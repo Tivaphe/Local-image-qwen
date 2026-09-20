@@ -1,15 +1,24 @@
 # Local Image Qwen
 
-Interface web **simple, 100 % locale** pour générer et éditer des images avec
-[Qwen‑Image‑2.1](https://huggingface.co/Qwen/Qwen-Image-2.1) au format **GGUF**,
+Interface web **simple, 100 % locale** pour générer et éditer des images au format **GGUF**,
 propulsée par [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp).
+
+Modèles pris en charge (sélectionnables dans un menu déroulant) :
+
+| Modèle | Points forts | Réglages par défaut |
+|---|---|---|
+| [Qwen‑Image‑2.1](https://huggingface.co/Qwen/Qwen-Image-2.1) (7B) | Qualité maximale, texte dans l'image | 30 étapes, CFG 6 |
+| [FLUX.2 klein 4B](https://huggingface.co/unsloth/FLUX.2-klein-4B-GGUF) | Très rapide, léger | 4 étapes, CFG 1 |
+| [FLUX.2 klein 9B](https://huggingface.co/unsloth/FLUX.2-klein-9B-GGUF) | Rapide, meilleure qualité que le 4B | 4 étapes, CFG 1 |
+
+Les trois font de la génération **et** de l'édition d'image (image(s) de référence + instruction).
 
 - Zéro dépendance lourde : pas de PyTorch, pas de CUDA toolkit à installer.
 - Le moteur (binaire précompilé) et les modèles se téléchargent **en un clic depuis l'interface**.
 - Texte → image et **édition d'image** (image(s) de référence + instruction).
 - Galerie avec seed, réglages, réutilisation en un clic.
 - Fonctionne sous **Windows / Linux / macOS**, GPU NVIDIA (CUDA), AMD (ROCm/Vulkan), Intel (Vulkan) ou CPU.
-- Tout fichier `.gguf` déposé dans `models/diffusion/` est utilisable : vous choisissez librement votre variante du modèle.
+- Tout fichier `.gguf` déposé dans `models/<modèle>/diffusion/` est utilisable : vous choisissez librement votre variante (fine‑tune, autre quantification, etc.) via un bouton radio.
 
 ## Prérequis
 
@@ -27,20 +36,24 @@ Linux/macOS :                 ./start.sh
 Le navigateur s'ouvre sur `http://127.0.0.1:7860`. Puis, dans l'onglet **Configuration** :
 
 1. **Moteur** → « Installer » (la variante est détectée automatiquement : `cuda` pour NVIDIA, sinon `vulkan`).
-2. **Modèles** → cliquer « Télécharger » sur les 3 fichiers *recommandés* (diffusion Q4_K, encodeur de texte Q4_K_M, VAE).
-   Ajoutez l'encodeur de vision (mmproj) si vous voulez faire de l'édition d'image.
-3. Revenir dans **Générer**, écrire un prompt, cliquer **Générer**.
+2. **Modèles** → déplier le modèle voulu et cliquer « Télécharger » sur les fichiers *recommandés*
+   (diffusion + encodeur de texte + VAE ; pour Qwen‑Image‑2.1 ajoutez le mmproj si vous voulez l'édition d'image).
+3. Revenir dans **Générer**, choisir le modèle dans le menu, écrire un prompt, cliquer **Générer**.
 
 ## Dossiers
 
 ```
-bin/                 moteur sd-cli (téléchargé automatiquement)
-models/diffusion/    modèles Qwen-Image-2.1 *.gguf   (n'importe quelle variante/quantification)
-models/text_encoder/ Qwen3-VL-8B-Instruct *.gguf
-models/vae/          qwen_image_2.1_vae_bf16.safetensors
-models/vision/       mmproj-Qwen3VL-8B-Instruct-*.gguf (édition d'image)
-models/lora/         LoRA optionnels (syntaxe <lora:nom:0.8> dans le prompt)
-outputs/             images générées + .json de métadonnées
+bin/                                  moteur sd-cli (téléchargé automatiquement)
+models/qwen_image_2.1/diffusion/      qwen_image_2.1-*.gguf   (n'importe quelle variante/quantification)
+models/qwen_image_2.1/text_encoder/   Qwen3-VL-8B-Instruct *.gguf
+models/qwen_image_2.1/vae/            qwen_image_2.1_vae_bf16.safetensors
+models/qwen_image_2.1/vision/         mmproj-Qwen3VL-8B-Instruct-*.gguf (édition d'image)
+models/flux2_klein_4b/diffusion/      flux-2-klein-4b-*.gguf
+models/flux2_klein_4b/text_encoder/   Qwen3-4B-*.gguf
+models/flux2_klein_4b/vae/            flux2-vae.safetensors
+models/flux2_klein_9b/…               idem avec flux-2-klein-9b-*.gguf et Qwen3-8B-*.gguf
+models/<modèle>/lora/                 LoRA optionnels (syntaxe <lora:nom:0.8> dans le prompt)
+outputs/                              images générées + .json de métadonnées
 ```
 
 Vous pouvez copier manuellement des fichiers dans ces dossiers : ils sont détectés
@@ -56,8 +69,11 @@ Une URL directe peut aussi être collée dans le champ prévu pour télécharger
 | GPU 6 Go / CPU seul | Q2_K–Q3_K, 768×768 | Q4_K_M | offload CPU ✔, VAE tiling ✔, patience… |
 | GPU ≥ 24 Go | Q8_0 | Q8_0 | offload CPU ✘ |
 
-Défauts : 1024×1024, 30 étapes, CFG 6, sampler `euler` (valeurs recommandées par stable-diffusion.cpp).
+Les réglages par défaut (étapes, CFG, sampler) sont appliqués automatiquement à chaque changement de modèle.
+FLUX.2 klein est distillé : gardez CFG = 1 et 4 étapes (jusqu'à 8 pour un peu plus de finesse).
 Dimensions toujours arrondies au multiple de 32.
+
+Tailles indicatives des installations recommandées : Qwen‑Image‑2.1 ≈ 11 Go · FLUX.2 klein 4B ≈ 9 Go · FLUX.2 klein 9B ≈ 13 Go.
 
 ## Accès depuis un autre appareil du réseau local
 

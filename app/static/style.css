@@ -68,3 +68,10 @@ code{background:#0a0c10;padding:1px 5px;border-radius:4px;font-size:12.5px}
 .lightbox img{max-width:95vw;max-height:88vh}
 .lightbox div{color:#ccc;font-size:13px;margin-top:8px;max-width:90vw;text-align:center}
 h2{margin:6px 0 12px}
+
+.fam{margin:14px 0;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.fam>summary{cursor:pointer;padding:10px 14px;background:var(--panel2);font-weight:600;list-style:none;display:flex;justify-content:space-between;align-items:center}
+.fam>summary::-webkit-details-marker{display:none}
+.fam .body{padding:4px 12px 10px}
+.fam .st{font-size:12px;font-weight:400}
+.fam .st.ok{color:var(--ok)}.fam .st.ko{color:var(--warn)}

@@ -12,8 +12,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import backend, config, downloads, generator
-from .catalog import CATALOG, MODEL_EXTENSIONS
-from .paths import MODEL_SUBDIRS, OUTPUTS_DIR, STATIC_DIR, UPLOADS_DIR, ensure_dirs
+from .catalog import CATEGORIES, DEFAULT_FAMILY, FAMILIES, MODEL_EXTENSIONS
+from .paths import MODELS_DIR, OUTPUTS_DIR, STATIC_DIR, UPLOADS_DIR, ensure_dirs, model_dir
 
 ensure_dirs()
 app = FastAPI(title="Local Image Qwen", docs_url=None, redoc_url=None)
@@ -28,8 +28,8 @@ def index():
 
 
 # ------------------------------------------------------------------ status
-def _list_models(category: str) -> list[dict]:
-    d = MODEL_SUBDIRS[category]
+def _list_models(family: str, category: str) -> list[dict]:
+    d = model_dir(family, category)
     out = []
     for p in sorted(d.iterdir()) if d.exists() else []:
         if p.is_file() and p.suffix.lower() in MODEL_EXTENSIONS:
@@ -40,26 +40,35 @@ def _list_models(category: str) -> list[dict]:
 @app.get("/api/status")
 def status():
     cfg = config.load()
-    local = {c: _list_models(c) for c in MODEL_SUBDIRS}
-    # auto-sélection si un seul fichier dispo et rien de configuré
+    local = {fam: {c: _list_models(fam, c) for c in CATEGORIES} for fam in FAMILIES}
+    # auto-sélection : si le fichier configuré n'existe plus, prendre le premier disponible
     changed = False
-    for key, cat in (("diffusion_model", "diffusion"), ("text_encoder", "text_encoder"), ("vae", "vae"), ("vision_encoder", "vision")):
-        names = [m["name"] for m in local[cat]]
-        if cfg.get(key) not in names:
-            cfg[key] = names[0] if names else ""
-            changed = True
+    for fam in FAMILIES:
+        for cat in ("diffusion", "text_encoder", "vae", "vision"):
+            names = [m["name"] for m in local[fam][cat]]
+            if cfg["selections"][fam].get(cat) not in names:
+                cfg["selections"][fam][cat] = names[0] if names else ""
+                changed = True
     if changed:
         config.save(cfg)
-    ready = all(cfg.get(k) for k in ("diffusion_model", "text_encoder", "vae"))
+    fam = cfg["family"]
+    sel = cfg["selections"][fam]
+    ready = all(sel.get(k) for k in ("diffusion", "text_encoder", "vae"))
+    families_status = {
+        f: {"ready": all(cfg["selections"][f].get(k) for k in ("diffusion", "text_encoder", "vae")),
+            "edit_ready": (not FAMILIES[f]["edit_requires_vision"]) or bool(cfg["selections"][f].get("vision"))}
+        for f in FAMILIES
+    }
     return {
         "engine": backend.installed_info(),
         "models": local,
-        "catalog": CATALOG,
+        "families": [{k: v for k, v in FAMILIES[f].items()} for f in FAMILIES],
+        "families_status": families_status,
         "config": cfg,
         "ready": ready and backend.find_binary() is not None,
-        "edit_ready": bool(cfg.get("vision_encoder")),
+        "edit_ready": families_status[fam]["edit_ready"],
         "samplers": generator.SAMPLERS,
-        "disk_free_gb": round(shutil.disk_usage(str(MODEL_SUBDIRS["diffusion"])).free / 1e9, 1),
+        "disk_free_gb": round(shutil.disk_usage(str(MODELS_DIR)).free / 1e9, 1),
         "jobs": downloads.list_jobs(),
         "generation": generator.state(),
     }
@@ -67,10 +76,8 @@ def status():
 
 # ------------------------------------------------------------------ config
 class ConfigIn(BaseModel):
-    diffusion_model: Optional[str] = None
-    text_encoder: Optional[str] = None
-    vision_encoder: Optional[str] = None
-    vae: Optional[str] = None
+    family: Optional[str] = None
+    selections: Optional[dict] = None
     width: Optional[int] = None
     height: Optional[int] = None
     steps: Optional[int] = None
@@ -87,12 +94,16 @@ class ConfigIn(BaseModel):
 
 @app.post("/api/config")
 def set_config(c: ConfigIn):
-    config.save({k: v for k, v in c.model_dump().items() if v is not None})
+    data = {k: v for k, v in c.model_dump().items() if v is not None}
+    if "family" in data and data["family"] not in FAMILIES:
+        raise HTTPException(400, "famille inconnue")
+    config.save(data)
     return {"ok": True, "config": config.load()}
 
 
 # --------------------------------------------------------------- downloads
 class DownloadIn(BaseModel):
+    family: str = DEFAULT_FAMILY
     category: str
     file_id: str = ""
     url: Optional[str] = None
@@ -101,7 +112,7 @@ class DownloadIn(BaseModel):
 @app.post("/api/download")
 def download(d: DownloadIn):
     try:
-        jid = downloads.start_model_download(d.category, d.file_id, d.url)
+        jid = downloads.start_model_download(d.family, d.category, d.file_id, d.url)
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"job": jid}
@@ -127,11 +138,11 @@ def jobs_clear():
     return {"ok": True}
 
 
-@app.delete("/api/models/{category}/{name}")
-def delete_model(category: str, name: str):
-    if category not in MODEL_SUBDIRS or "/" in name or "\\" in name:
+@app.delete("/api/models/{family}/{category}/{name}")
+def delete_model(family: str, category: str, name: str):
+    if family not in FAMILIES or category not in CATEGORIES or "/" in name or "\\" in name:
         raise HTTPException(400, "requête invalide")
-    p = MODEL_SUBDIRS[category] / name
+    p = model_dir(family, category) / name
     if p.exists():
         p.unlink()
     return {"ok": True}
@@ -201,7 +212,7 @@ def gallery_delete(name: str):
 
 @app.post("/api/open-folder")
 def open_folder(which: str = Form("outputs")):
-    target = OUTPUTS_DIR if which == "outputs" else MODEL_SUBDIRS["diffusion"].parent
+    target = OUTPUTS_DIR if which == "outputs" else MODELS_DIR
     try:
         if os.name == "nt":
             os.startfile(str(target))  # type: ignore[attr-defined]

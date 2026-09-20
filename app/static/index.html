@@ -8,7 +8,7 @@
 </head>
 <body>
 <header>
-  <div class="brand">🖼️ <b>Local Image Qwen</b> <span class="sub">Qwen‑Image‑2.1 · GGUF · 100 % local</span></div>
+  <div class="brand">🖼️ <b>Local Image Qwen</b> <span class="sub">Qwen‑Image‑2.1 · FLUX.2 klein · GGUF · 100 % local</span></div>
   <nav>
     <button data-tab="generate" class="active">Générer</button>
     <button data-tab="gallery">Galerie</button>
@@ -25,6 +25,11 @@
         ⚠️ L'application n'est pas encore prête. Allez dans <a href="#" data-goto="setup">Configuration</a> pour installer le moteur et télécharger les modèles.
       </div>
 
+      <label>Modèle
+        <select id="family"></select>
+      </label>
+      <p class="hint" id="familyDesc"></p>
+
       <label>Prompt (description de l'image)
         <textarea id="prompt" rows="5" placeholder="Ex : un chat roux tenant une pancarte « Bonjour », lumière douce, photo réaliste"></textarea>
       </label>
@@ -36,7 +41,7 @@
 
       <div class="card">
         <div class="card-title">Édition d'image (optionnel)</div>
-        <p class="hint">Ajoutez une ou plusieurs images de référence et décrivez la modification dans le prompt (ex : « change la couleur du ciel en rose »). Nécessite l'encodeur de vision (<span id="editStatus">?</span>).</p>
+        <p class="hint">Ajoutez une ou plusieurs images de référence et décrivez la modification dans le prompt (ex : « change la couleur du ciel en rose »). État pour ce modèle : <span id="editStatus">?</span>.</p>
         <input type="file" id="refs" accept="image/*" multiple>
         <div id="refPreview" class="refs"></div>
       </div>
@@ -61,7 +66,7 @@
 
       <div class="grid3">
         <label>Étapes <span class="val" id="stepsVal">30</span>
-          <input type="range" id="steps" min="4" max="60" value="30">
+          <input type="range" id="steps" min="1" max="60" value="30">
         </label>
         <label>Guidage (CFG) <span class="val" id="cfgVal">6.0</span>
           <input type="range" id="cfg" min="1" max="12" step="0.5" value="6">
@@ -123,7 +128,7 @@
 
   <div class="card">
     <div class="card-title">2. Modèles <span class="small" id="diskFree"></span></div>
-    <p class="hint">Cliquez « Télécharger » sur les fichiers marqués <b>recommandé</b> pour une installation type (~11 Go). Tout fichier <code>.gguf</code>/<code>.safetensors</code> copié manuellement dans <code>models/&lt;catégorie&gt;/</code> apparaît automatiquement — y compris vos propres variantes du modèle de diffusion.</p>
+    <p class="hint">Pour chaque modèle, cliquez « Télécharger » sur les fichiers marqués <b>recommandé</b>. Tout fichier <code>.gguf</code>/<code>.safetensors</code> copié manuellement dans <code>models/&lt;modèle&gt;/&lt;catégorie&gt;/</code> apparaît automatiquement — y compris vos propres variantes (fine‑tunes, autres quantifications) du modèle de diffusion, sélectionnables par le bouton radio.</p>
     <div id="modelSections"></div>
   </div>
 

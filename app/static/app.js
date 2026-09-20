@@ -10,13 +10,15 @@ const fmtTime = (s) => (s < 60 ? `${s.toFixed(0)} s` : `${Math.floor(s / 60)} mi
 
 let STATUS = null;
 const CAT_LABELS = {
-  diffusion: "Modèle de diffusion (Qwen‑Image‑2.1 GGUF)",
-  text_encoder: "Encodeur de texte (Qwen3‑VL‑8B GGUF)",
+  diffusion: "Modèle de diffusion (GGUF)",
+  text_encoder: "Encodeur de texte (GGUF)",
   vae: "VAE",
-  vision: "Encodeur de vision (mmproj) — édition d'image uniquement",
-  lora: "LoRA (optionnel, .safetensors)",
+  vision: "Encodeur de vision (mmproj) — édition d'image",
+  lora: "LoRA (optionnel)",
 };
-const CAT_KEY = { diffusion: "diffusion_model", text_encoder: "text_encoder", vae: "vae", vision: "vision_encoder" };
+const SELECTABLE = ["diffusion", "text_encoder", "vae", "vision"];
+const postJSON = (url, body) => api(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+const famById = (id) => STATUS.families.find((f) => f.id === id);
 
 // ------------------------------------------------------------- onglets
 function showTab(name) {
@@ -37,7 +39,14 @@ async function refreshStatus() {
   $("#notReady").classList.toggle("hidden", STATUS.ready);
   $("#setupBadge").classList.toggle("hidden", STATUS.ready);
   $("#btnGenerate").disabled = !STATUS.ready || STATUS.generation.running;
-  $("#editStatus").textContent = STATUS.edit_ready ? "installé ✔" : "non installé";
+  $("#editStatus").textContent = STATUS.edit_ready ? "disponible ✔" : "encodeur de vision manquant";
+
+  // sélecteur de famille
+  const fs = $("#family");
+  if (!fs.options.length) STATUS.families.forEach((f) => fs.add(new Option(f.name, f.id)));
+  [...fs.options].forEach((o) => { const st = STATUS.families_status[o.value]; o.text = famById(o.value).name + (st.ready ? "" : "  (non installé)"); });
+  fs.value = c.family;
+  $("#familyDesc").textContent = famById(c.family).description;
 
   // sampler
   const sel = $("#sampler");
@@ -79,60 +88,83 @@ function renderEngine() {
 function renderModels() {
   $("#diskFree").textContent = `— ${STATUS.disk_free_gb} Go libres sur le disque`;
   const root = $("#modelSections");
+  const openFams = new Set([...root.querySelectorAll("details.fam[open]")].map((d) => d.dataset.fam));
+  if (!root.children.length) openFams.add(STATUS.config.family);
   root.innerHTML = "";
   const runningJobs = new Set(STATUS.jobs.filter((j) => j.status === "running").map((j) => j.label));
-  for (const cat of ["diffusion", "text_encoder", "vae", "vision", "lora"]) {
-    const local = STATUS.models[cat] || [];
-    const catalog = STATUS.catalog[cat] || [];
-    const localNames = new Set(local.map((m) => m.name));
-    const sec = document.createElement("div");
-    sec.className = "msec";
-    sec.innerHTML = `<h4>${CAT_LABELS[cat]}</h4>`;
-    const key = CAT_KEY[cat];
 
-    // fichiers locaux
-    for (const m of local) {
-      const row = document.createElement("div");
-      row.className = "mrow";
-      row.innerHTML = `${key ? `<input type="radio" name="sel-${cat}" ${STATUS.config[key] === m.name ? "checked" : ""}>` : ""}
-        <span class="name">${m.name}</span><span class="small">${m.size_gb} Go</span>
-        <span class="tag ok">présent</span><button class="ghost" title="Supprimer">🗑</button>`;
-      if (key) row.querySelector("input").onchange = () => api("/api/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [key]: m.name }) }).then(refreshStatus);
-      row.querySelector("button").onclick = async () => {
-        if (confirm(`Supprimer ${m.name} ?`)) { await api(`/api/models/${cat}/${encodeURIComponent(m.name)}`, { method: "DELETE" }); refreshStatus(); }
-      };
-      sec.appendChild(row);
-    }
-    // catalogue
-    for (const item of catalog) {
-      if (localNames.has(item.id)) continue;
-      const row = document.createElement("div");
-      row.className = "mrow";
-      const busy = runningJobs.has(`${cat}/${item.id}`);
-      row.innerHTML = `<span class="name">${item.label}</span>${item.recommended ? '<span class="tag rec">recommandé</span>' : ""}
-        <button class="${item.recommended ? "primary" : ""}" ${busy ? "disabled" : ""}>${busy ? "⏳ en cours" : "⬇ Télécharger"}</button>`;
-      row.querySelector("button").onclick = async () => {
-        try { await api("/api/download", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ category: cat, file_id: item.id }) }); }
-        catch (e) { alert(e.message); }
+  for (const fam of STATUS.families) {
+    const st = STATUS.families_status[fam.id];
+    const det = document.createElement("details");
+    det.className = "fam"; det.dataset.fam = fam.id; det.open = openFams.has(fam.id);
+    det.innerHTML = `<summary><span>${fam.name} <span class="small">— ${fam.description}</span></span>
+      <span class="st ${st.ready ? "ok" : "ko"}">${st.ready ? "✔ prêt" : "fichiers manquants"}${fam.edit_requires_vision ? (st.edit_ready ? " · édition ✔" : " · édition : mmproj manquant") : ""}</span></summary>
+      <div class="body"></div>`;
+    const body = det.querySelector(".body");
+    const sel = STATUS.config.selections[fam.id];
+
+    for (const cat of ["diffusion", "text_encoder", "vae", "vision", "lora"]) {
+      const local = STATUS.models[fam.id][cat] || [];
+      const catalog = fam[cat] || [];
+      if (cat === "vision" && !fam.edit_requires_vision && !local.length) continue;
+      const localNames = new Set(local.map((m) => m.name));
+      const sec = document.createElement("div");
+      sec.className = "msec";
+      sec.innerHTML = `<h4>${CAT_LABELS[cat]}</h4>`;
+      const selectable = SELECTABLE.includes(cat);
+
+      for (const m of local) {
+        const row = document.createElement("div");
+        row.className = "mrow";
+        row.innerHTML = `${selectable ? `<input type="radio" name="sel-${fam.id}-${cat}" ${sel[cat] === m.name ? "checked" : ""}>` : ""}
+          <span class="name">${m.name}</span><span class="small">${m.size_gb} Go</span>
+          <span class="tag ok">présent</span><button class="ghost" title="Supprimer">🗑</button>`;
+        if (selectable) row.querySelector("input").onchange = () => postJSON("/api/config", { selections: { [fam.id]: { [cat]: m.name } } }).then(refreshStatus);
+        row.querySelector("button").onclick = async () => {
+          if (confirm(`Supprimer ${m.name} ?`)) { await api(`/api/models/${fam.id}/${cat}/${encodeURIComponent(m.name)}`, { method: "DELETE" }); refreshStatus(); }
+        };
+        sec.appendChild(row);
+      }
+      for (const item of catalog) {
+        if (localNames.has(item.id)) continue;
+        const row = document.createElement("div");
+        row.className = "mrow";
+        const busy = runningJobs.has(`${fam.id}/${cat}/${item.id}`);
+        row.innerHTML = `<span class="name">${item.label}</span>${item.recommended ? '<span class="tag rec">recommandé</span>' : ""}
+          <button class="${item.recommended ? "primary" : ""}" ${busy ? "disabled" : ""}>${busy ? "⏳ en cours" : "⬇ Télécharger"}</button>`;
+        row.querySelector("button").onclick = async () => {
+          try { await postJSON("/api/download", { family: fam.id, category: cat, file_id: item.id }); } catch (e) { alert(e.message); }
+          refreshStatus();
+        };
+        sec.appendChild(row);
+      }
+      const custom = document.createElement("div");
+      custom.className = "mrow";
+      custom.innerHTML = `<input type="text" placeholder="URL directe d'un fichier .gguf/.safetensors à télécharger dans ce dossier" style="margin:0"><button>⬇</button>`;
+      custom.querySelector("button").onclick = async () => {
+        const url = custom.querySelector("input").value.trim();
+        if (!url) return;
+        try { await postJSON("/api/download", { family: fam.id, category: cat, file_id: "", url }); } catch (e) { alert(e.message); }
         refreshStatus();
       };
-      sec.appendChild(row);
+      sec.appendChild(custom);
+      body.appendChild(sec);
     }
-    // URL personnalisée
-    const custom = document.createElement("div");
-    custom.className = "mrow";
-    custom.innerHTML = `<input type="text" placeholder="URL directe d'un fichier .gguf/.safetensors à télécharger dans ce dossier" style="margin:0"><button>⬇</button>`;
-    custom.querySelector("button").onclick = async () => {
-      const url = custom.querySelector("input").value.trim();
-      if (!url) return;
-      try { await api("/api/download", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ category: cat, file_id: "", url }) }); }
-      catch (e) { alert(e.message); }
-      refreshStatus();
-    };
-    sec.appendChild(custom);
-    root.appendChild(sec);
+    root.appendChild(det);
   }
 }
+
+// changement de modèle : applique les réglages par défaut de la famille
+$("#family").onchange = async (e) => {
+  const fam = famById(e.target.value);
+  await postJSON("/api/config", { family: fam.id });
+  const d = fam.defaults;
+  $("#steps").value = d.steps; $("#stepsVal").textContent = d.steps;
+  $("#cfg").value = d.cfg_scale; $("#cfgVal").textContent = Number(d.cfg_scale).toFixed(1);
+  $("#sampler").value = d.sampler;
+  $("#familyDesc").textContent = fam.description;
+  refreshStatus();
+};
 
 function renderJobs() {
   const root = $("#jobs");
@@ -218,7 +250,7 @@ function renderGeneration(g) {
     $("#resultBox").innerHTML = `<img src="/outputs/${g.result}?t=${Date.now()}" alt="">`;
     $("#resultBox img").onclick = () => openLightbox(`/outputs/${g.result}`, g.result);
     fetch(`/outputs/${g.result.replace(".png", ".json")}`).then((r) => r.json()).then((m) => {
-      $("#resultMeta").innerHTML = `Seed <b>${m.seed}</b> · ${m.width}×${m.height} · ${m.steps} étapes · CFG ${m.cfg_scale} · ${m.elapsed_s} s
+      $("#resultMeta").innerHTML = `${m.family ? (famById(m.family)?.name || m.family) + " · " : ""}Seed <b>${m.seed}</b> · ${m.width}×${m.height} · ${m.steps} étapes · CFG ${m.cfg_scale} · ${m.elapsed_s} s
         <button class="ghost" id="reuseSeed">↺ réutiliser la seed</button>`;
       $("#reuseSeed").onclick = () => ($("#seed").value = m.seed);
     }).catch(() => {});
@@ -239,7 +271,8 @@ async function loadGallery() {
       <div class="tools"><button title="Réutiliser le prompt et les réglages">↺ Réutiliser</button><a href="/outputs/${it.file}" download><button>⬇</button></a><button title="Supprimer">🗑</button></div>`;
     d.querySelector("img").onclick = () => openLightbox(`/outputs/${it.file}`, m.prompt || it.file);
     const [reuse, , del] = d.querySelectorAll("button");
-    reuse.onclick = () => {
+    reuse.onclick = async () => {
+      if (m.family && m.family !== STATUS.config.family && famById(m.family)) { await postJSON("/api/config", { family: m.family }); await refreshStatus(); }
       if (m.prompt) $("#prompt").value = m.prompt;
       if (m.negative_prompt != null) $("#negative").value = m.negative_prompt;
       if (m.seed != null) $("#seed").value = m.seed;
@@ -265,14 +298,14 @@ $("#lightbox").onclick = () => $("#lightbox").classList.add("hidden");
 
 // ------------------------------------------------------------- setup
 $("#btnEngine").onclick = async () => {
-  await api("/api/engine/install", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ flavor: $("#flavor").value }) });
+  await postJSON("/api/engine/install", { flavor: $("#flavor").value });
   refreshStatus();
 };
 $("#btnSavePerf").onclick = async () => {
-  await api("/api/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+  await postJSON("/api/config", {
     offload_to_cpu: $("#offload").checked, flash_attention: $("#fa").checked, vae_tiling: $("#vaetiling").checked,
     threads: parseInt($("#threads").value || "-1", 10), extra_args: $("#extra").value,
-  }) });
+  });
   $("#btnSavePerf").textContent = "Enregistré ✔"; setTimeout(() => ($("#btnSavePerf").textContent = "Enregistrer"), 1500);
 };
 $("#btnClearJobs").onclick = () => api("/api/jobs/clear", { method: "POST" }).then(refreshStatus);

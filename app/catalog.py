@@ -1,104 +1,101 @@
 """
-Catalogue des fichiers "officiels" proposés au téléchargement en un clic.
+Familles de modèles supportées et catalogue de fichiers téléchargeables en un clic.
 
-Tout fichier .gguf / .safetensors déposé manuellement dans les dossiers
-`models/diffusion`, `models/text_encoder`, `models/vae`, `models/vision`
-est détecté automatiquement, même s'il n'est pas listé ici.
+Chaque famille a ses propres dossiers : models/<famille>/{diffusion,text_encoder,vae,vision,lora}
+Tout fichier .gguf / .safetensors déposé manuellement dans ces dossiers est détecté
+automatiquement, même s'il n'est pas listé ici (variantes, fine-tunes, autres quantifications…).
 """
 
 HF = "https://huggingface.co"
 
-# --- Modèle de diffusion (Qwen-Image-2.1, GGUF) ---------------------------
-DIFFUSION_MODELS = [
-    {
-        "id": "qwen_image_2.1-Q2_K.gguf",
-        "label": "Q2_K  (2.6 Go) — très léger, qualité réduite",
-        "url": f"{HF}/leejet/Qwen-Image-2.1-GGUF/resolve/main/qwen_image_2.1-Q2_K.gguf",
-        "size_gb": 2.56,
-    },
-    {
-        "id": "qwen_image_2.1-Q3_K.gguf",
-        "label": "Q3_K  (3.3 Go) — léger",
-        "url": f"{HF}/leejet/Qwen-Image-2.1-GGUF/resolve/main/qwen_image_2.1-Q3_K.gguf",
-        "size_gb": 3.27,
-    },
-    {
-        "id": "qwen_image_2.1-Q4_K.gguf",
-        "label": "Q4_K  (4.2 Go) — recommandé (bon équilibre)",
-        "url": f"{HF}/leejet/Qwen-Image-2.1-GGUF/resolve/main/qwen_image_2.1-Q4_K.gguf",
-        "size_gb": 4.2,
-        "recommended": True,
-    },
-    {
-        "id": "qwen_image_2.1-Q5_0.gguf",
-        "label": "Q5_0  (5.1 Go)",
-        "url": f"{HF}/leejet/Qwen-Image-2.1-GGUF/resolve/main/qwen_image_2.1-Q5_0.gguf",
-        "size_gb": 5.07,
-    },
-    {
-        "id": "qwen_image_2.1-Q6_K.gguf",
-        "label": "Q6_K  (6.0 Go) — haute qualité",
-        "url": f"{HF}/leejet/Qwen-Image-2.1-GGUF/resolve/main/qwen_image_2.1-Q6_K.gguf",
-        "size_gb": 6.0,
-    },
-    {
-        "id": "qwen_image_2.1-Q8_0.gguf",
-        "label": "Q8_0  (7.7 Go) — quasi sans perte",
-        "url": f"{HF}/leejet/Qwen-Image-2.1-GGUF/resolve/main/qwen_image_2.1-Q8_0.gguf",
-        "size_gb": 7.69,
-    },
-]
 
-# --- Encodeur de texte (Qwen3-VL-8B-Instruct, GGUF) -----------------------
-TEXT_ENCODERS = [
-    {
-        "id": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
-        "label": "Qwen3-VL-8B Q4_K_M (5.0 Go) — recommandé",
-        "url": f"{HF}/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/main/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
-        "size_gb": 5.03,
-        "recommended": True,
-    },
-    {
-        "id": "Qwen3VL-8B-Instruct-Q8_0.gguf",
-        "label": "Qwen3-VL-8B Q8_0 (8.7 Go)",
-        "url": f"{HF}/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/main/Qwen3VL-8B-Instruct-Q8_0.gguf",
-        "size_gb": 8.71,
-    },
-]
+def _f(repo: str, path: str, size_gb: float, label: str, recommended: bool = False) -> dict:
+    return {
+        "id": path.split("/")[-1],
+        "label": f"{label} ({size_gb:g} Go)" + (" — recommandé" if recommended else ""),
+        "url": f"{HF}/{repo}/resolve/main/{path}",
+        "size_gb": size_gb,
+        "recommended": recommended,
+    }
 
-# --- Encodeur de vision (nécessaire uniquement pour l'édition d'image) ----
-VISION_ENCODERS = [
-    {
-        "id": "mmproj-Qwen3VL-8B-Instruct-F16.gguf",
-        "label": "mmproj F16 (1.2 Go) — recommandé",
-        "url": f"{HF}/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-8B-Instruct-F16.gguf",
-        "size_gb": 1.16,
-        "recommended": True,
-    },
-    {
-        "id": "mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf",
-        "label": "mmproj Q8_0 (0.75 Go)",
-        "url": f"{HF}/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf",
-        "size_gb": 0.75,
-    },
-]
 
-# --- VAE (spécifique à Qwen-Image-2.1, non interchangeable) ---------------
-VAES = [
-    {
-        "id": "qwen_image_2.1_vae_bf16.safetensors",
-        "label": "VAE Qwen-Image-2.1 bf16 (0.68 Go) — obligatoire",
-        "url": f"{HF}/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors",
-        "size_gb": 0.68,
-        "recommended": True,
-    },
-]
-
-CATALOG = {
-    "diffusion": DIFFUSION_MODELS,
-    "text_encoder": TEXT_ENCODERS,
-    "vision": VISION_ENCODERS,
-    "vae": VAES,
+# ------------------------------------------------------------ Qwen-Image-2.1
+QWEN_IMAGE_21 = {
+    "id": "qwen_image_2.1",
+    "name": "Qwen‑Image‑2.1",
+    "description": "Modèle Qwen 7B. Excellente qualité, très bon rendu du texte. ~30 étapes, plus lent.",
+    "defaults": {"steps": 30, "cfg_scale": 6.0, "sampler": "euler", "width": 1024, "height": 1024},
+    "edit_requires_vision": True,
+    "diffusion": [
+        _f("leejet/Qwen-Image-2.1-GGUF", "qwen_image_2.1-Q2_K.gguf", 2.56, "Q2_K — très léger, qualité réduite"),
+        _f("leejet/Qwen-Image-2.1-GGUF", "qwen_image_2.1-Q3_K.gguf", 3.27, "Q3_K — léger"),
+        _f("leejet/Qwen-Image-2.1-GGUF", "qwen_image_2.1-Q4_K.gguf", 4.2, "Q4_K — bon équilibre", True),
+        _f("leejet/Qwen-Image-2.1-GGUF", "qwen_image_2.1-Q5_0.gguf", 5.07, "Q5_0"),
+        _f("leejet/Qwen-Image-2.1-GGUF", "qwen_image_2.1-Q6_K.gguf", 6.0, "Q6_K — haute qualité"),
+        _f("leejet/Qwen-Image-2.1-GGUF", "qwen_image_2.1-Q8_0.gguf", 7.69, "Q8_0 — quasi sans perte"),
+    ],
+    "text_encoder": [
+        _f("Qwen/Qwen3-VL-8B-Instruct-GGUF", "Qwen3VL-8B-Instruct-Q4_K_M.gguf", 5.03, "Qwen3‑VL‑8B Q4_K_M", True),
+        _f("Qwen/Qwen3-VL-8B-Instruct-GGUF", "Qwen3VL-8B-Instruct-Q8_0.gguf", 8.71, "Qwen3‑VL‑8B Q8_0"),
+    ],
+    "vision": [
+        _f("Qwen/Qwen3-VL-8B-Instruct-GGUF", "mmproj-Qwen3VL-8B-Instruct-F16.gguf", 1.16, "mmproj F16", True),
+        _f("Qwen/Qwen3-VL-8B-Instruct-GGUF", "mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf", 0.75, "mmproj Q8_0"),
+    ],
+    "vae": [
+        _f("Comfy-Org/Qwen-Image-2.1", "vae/qwen_image_2.1_vae_bf16.safetensors", 0.68, "VAE Qwen‑Image‑2.1 bf16", True),
+    ],
 }
 
+# ------------------------------------------------------------ FLUX.2 klein
+FLUX2_VAE = [_f("Comfy-Org/vae-text-encorder-for-flux-klein-4b", "split_files/vae/flux2-vae.safetensors", 0.34, "VAE FLUX.2", True)]
+
+FLUX2_KLEIN_4B = {
+    "id": "flux2_klein_4b",
+    "name": "FLUX.2 klein 4B",
+    "description": "Modèle distillé 4B (Black Forest Labs). Très rapide : 4 étapes, CFG 1. Génération et édition.",
+    "defaults": {"steps": 4, "cfg_scale": 1.0, "sampler": "euler", "width": 1024, "height": 1024},
+    "edit_requires_vision": False,
+    "diffusion": [
+        _f("unsloth/FLUX.2-klein-4B-GGUF", "flux-2-klein-4b-Q3_K_M.gguf", 2.12, "Q3_K_M — léger"),
+        _f("unsloth/FLUX.2-klein-4B-GGUF", "flux-2-klein-4b-Q4_K_M.gguf", 2.6, "Q4_K_M"),
+        _f("unsloth/FLUX.2-klein-4B-GGUF", "flux-2-klein-4b-Q5_K_M.gguf", 3.07, "Q5_K_M"),
+        _f("unsloth/FLUX.2-klein-4B-GGUF", "flux-2-klein-4b-Q6_K.gguf", 3.41, "Q6_K"),
+        _f("unsloth/FLUX.2-klein-4B-GGUF", "flux-2-klein-4b-Q8_0.gguf", 4.3, "Q8_0 — quasi sans perte", True),
+        _f("unsloth/FLUX.2-klein-4B-GGUF", "flux-2-klein-4b-BF16.gguf", 7.75, "BF16 — original"),
+    ],
+    "text_encoder": [
+        _f("unsloth/Qwen3-4B-GGUF", "Qwen3-4B-Q4_K_M.gguf", 2.5, "Qwen3‑4B Q4_K_M"),
+        _f("unsloth/Qwen3-4B-GGUF", "Qwen3-4B-Q6_K.gguf", 3.31, "Qwen3‑4B Q6_K"),
+        _f("unsloth/Qwen3-4B-GGUF", "Qwen3-4B-Q8_0.gguf", 4.28, "Qwen3‑4B Q8_0", True),
+    ],
+    "vision": [],
+    "vae": FLUX2_VAE,
+}
+
+FLUX2_KLEIN_9B = {
+    "id": "flux2_klein_9b",
+    "name": "FLUX.2 klein 9B",
+    "description": "Modèle distillé 9B (Black Forest Labs). Meilleure qualité que le 4B, toujours 4 étapes, CFG 1.",
+    "defaults": {"steps": 4, "cfg_scale": 1.0, "sampler": "euler", "width": 1024, "height": 1024},
+    "edit_requires_vision": False,
+    "diffusion": [
+        _f("unsloth/FLUX.2-klein-9B-GGUF", "flux-2-klein-9b-Q3_K_M.gguf", 4.77, "Q3_K_M — léger"),
+        _f("unsloth/FLUX.2-klein-9B-GGUF", "flux-2-klein-9b-Q4_K_M.gguf", 5.91, "Q4_K_M"),
+        _f("unsloth/FLUX.2-klein-9B-GGUF", "flux-2-klein-9b-Q5_K_M.gguf", 7.02, "Q5_K_M"),
+        _f("unsloth/FLUX.2-klein-9B-GGUF", "flux-2-klein-9b-Q6_K.gguf", 7.87, "Q6_K — bon équilibre", True),
+        _f("unsloth/FLUX.2-klein-9B-GGUF", "flux-2-klein-9b-Q8_0.gguf", 9.98, "Q8_0 — quasi sans perte"),
+    ],
+    "text_encoder": [
+        _f("unsloth/Qwen3-8B-GGUF", "Qwen3-8B-Q4_K_M.gguf", 5.03, "Qwen3‑8B Q4_K_M", True),
+        _f("unsloth/Qwen3-8B-GGUF", "Qwen3-8B-Q6_K.gguf", 6.73, "Qwen3‑8B Q6_K"),
+        _f("unsloth/Qwen3-8B-GGUF", "Qwen3-8B-Q8_0.gguf", 8.71, "Qwen3‑8B Q8_0"),
+    ],
+    "vision": [],
+    "vae": FLUX2_VAE,
+}
+
+FAMILIES = {f["id"]: f for f in (QWEN_IMAGE_21, FLUX2_KLEIN_4B, FLUX2_KLEIN_9B)}
+DEFAULT_FAMILY = "qwen_image_2.1"
+CATEGORIES = ("diffusion", "text_encoder", "vae", "vision", "lora")
 MODEL_EXTENSIONS = (".gguf", ".safetensors")

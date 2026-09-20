@@ -8,8 +8,8 @@ import uuid
 from pathlib import Path
 
 from . import backend
-from .catalog import CATALOG
-from .paths import MODEL_SUBDIRS
+from .catalog import FAMILIES
+from .paths import model_dir
 
 _jobs: dict[str, dict] = {}
 _lock = threading.Lock()
@@ -70,21 +70,20 @@ def _download_file(url: str, dest: Path, jid: str):
     tmp.replace(dest)
 
 
-def start_model_download(category: str, file_id: str, custom_url: str | None = None) -> str:
-    if category not in MODEL_SUBDIRS:
-        raise ValueError("catégorie inconnue")
+def start_model_download(family: str, category: str, file_id: str, custom_url: str | None = None) -> str:
+    dest_dir = model_dir(family, category)
     url = custom_url
     if not url:
-        entry = next((e for e in CATALOG.get(category, []) if e["id"] == file_id), None)
+        entry = next((e for e in FAMILIES[family].get(category, []) if e["id"] == file_id), None)
         if not entry:
             raise ValueError("fichier inconnu dans le catalogue")
         url = entry["url"]
     if not file_id:
         file_id = url.split("?")[0].rstrip("/").split("/")[-1]
-    dest = MODEL_SUBDIRS[category] / file_id
+    dest = dest_dir / file_id
     if dest.exists():
         raise ValueError("fichier déjà présent")
-    jid = _new_job("model", f"{category}/{file_id}")
+    jid = _new_job("model", f"{family}/{category}/{file_id}")
 
     def run():
         try:

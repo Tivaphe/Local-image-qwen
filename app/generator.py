@@ -13,7 +13,8 @@ from datetime import datetime
 from pathlib import Path
 
 from . import backend
-from .paths import MODEL_SUBDIRS, OUTPUTS_DIR
+from .catalog import FAMILIES
+from .paths import OUTPUTS_DIR, model_dir
 
 SAMPLERS = ["euler", "euler_a", "heun", "dpm2", "dpm++2m", "dpm++2mv2", "dpm++2s_a", "ipndm", "ipndm_v", "lcm", "ddim_trailing", "tcd"]
 
@@ -68,10 +69,10 @@ def _log(line: str):
             _state["phase"] = "Enregistrement"
 
 
-def _model_path(category: str, name: str) -> Path | None:
+def _model_path(family: str, category: str, name: str) -> Path | None:
     if not name:
         return None
-    p = MODEL_SUBDIRS[category] / name
+    p = model_dir(family, category) / name
     return p if p.exists() else None
 
 
@@ -80,17 +81,20 @@ def build_command(cfg: dict, params: dict, out_path: Path) -> list[str]:
     if not exe:
         raise RuntimeError("Moteur non installé : allez dans l'onglet Configuration.")
 
-    diffusion = _model_path("diffusion", cfg.get("diffusion_model", ""))
-    te = _model_path("text_encoder", cfg.get("text_encoder", ""))
-    vae = _model_path("vae", cfg.get("vae", ""))
-    vision = _model_path("vision", cfg.get("vision_encoder", ""))
+    family = cfg.get("family")
+    fam = FAMILIES[family]
+    sel = cfg.get("selections", {}).get(family, {})
+    diffusion = _model_path(family, "diffusion", sel.get("diffusion", ""))
+    te = _model_path(family, "text_encoder", sel.get("text_encoder", ""))
+    vae = _model_path(family, "vae", sel.get("vae", ""))
+    vision = _model_path(family, "vision", sel.get("vision", ""))
     missing = [n for n, p in (("modèle de diffusion", diffusion), ("encodeur de texte", te), ("VAE", vae)) if p is None]
     if missing:
-        raise RuntimeError("Fichier(s) manquant(s) ou non sélectionné(s) : " + ", ".join(missing))
+        raise RuntimeError(f"[{fam['name']}] fichier(s) manquant(s) ou non sélectionné(s) : " + ", ".join(missing))
 
     ref_images: list[str] = params.get("ref_images") or []
-    if ref_images and vision is None:
-        raise RuntimeError("L'édition d'image nécessite l'encodeur de vision (mmproj). Téléchargez-le dans Configuration.")
+    if ref_images and fam["edit_requires_vision"] and vision is None:
+        raise RuntimeError("L'édition d'image avec ce modèle nécessite l'encodeur de vision (mmproj). Téléchargez-le dans Configuration.")
 
     seed = int(params.get("seed", -1))
     if seed < 0:
@@ -115,8 +119,9 @@ def build_command(cfg: dict, params: dict, out_path: Path) -> list[str]:
     neg = (params.get("negative_prompt") or "").strip()
     if neg:
         cmd += ["-n", neg]
-    if vision is not None and ref_images:
-        cmd += ["--llm_vision", str(vision)]
+    if ref_images:
+        if vision is not None:
+            cmd += ["--llm_vision", str(vision)]
         for r in ref_images:
             cmd += ["-r", r]
     if cfg.get("offload_to_cpu", True):
@@ -128,7 +133,7 @@ def build_command(cfg: dict, params: dict, out_path: Path) -> list[str]:
     threads = int(cfg.get("threads", -1) or -1)
     if threads > 0:
         cmd += ["-t", str(threads)]
-    lora_dir = MODEL_SUBDIRS["lora"]
+    lora_dir = model_dir(family, "lora")
     if any(p.suffix.lower() in (".safetensors", ".gguf") for p in lora_dir.glob("*")):
         cmd += ["--lora-model-dir", str(lora_dir)]
     extra = (cfg.get("extra_args") or "").strip()
@@ -188,7 +193,7 @@ def start(cfg: dict, params: dict) -> None:
                     "seed": params["seed"], "steps": params.get("steps"), "cfg_scale": params.get("cfg_scale"),
                     "sampler": params.get("sampler"), "width": params.get("width"), "height": params.get("height"),
                     "ref_images": [Path(r).name for r in params.get("ref_images") or []],
-                    "diffusion_model": cfg.get("diffusion_model"), "elapsed_s": round(elapsed, 1),
+                    "family": cfg.get("family"), "diffusion_model": cfg.get("selections", {}).get(cfg.get("family"), {}).get("diffusion"), "elapsed_s": round(elapsed, 1),
                     "date": datetime.now().isoformat(timespec="seconds"),
                 }
                 out_path.with_suffix(".json").write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")

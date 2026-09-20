@@ -8,8 +8,7 @@ config.json
 bin/*
 !bin/.gitkeep
 models/**
-!models/*/
-!models/*/.gitkeep
+!models/.gitkeep
 outputs/*
 !outputs/.gitkeep
 uploads/
