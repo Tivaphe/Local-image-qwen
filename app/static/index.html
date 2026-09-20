@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local Image Qwen</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div class="brand">🖼️ <b>Local Image Qwen</b> <span class="sub">Qwen‑Image‑2.1 · FLUX.2 klein · GGUF · 100 % local</span></div>
+  <nav>
+    <button data-tab="generate" class="active">Générer</button>
+    <button data-tab="gallery">Galerie</button>
+    <button data-tab="setup">Configuration <span id="setupBadge" class="badge hidden">!</span></button>
+  </nav>
+</header>
+
+<main>
+<!-- ============================== GÉNÉRER ============================== -->
+<section id="tab-generate" class="tab active">
+  <div class="cols">
+    <div class="col-left">
+      <div id="notReady" class="notice hidden">
+        ⚠️ L'application n'est pas encore prête. Allez dans <a href="#" data-goto="setup">Configuration</a> pour installer le moteur et télécharger les modèles.
+      </div>
+
+      <label>Modèle
+        <select id="family"></select>
+      </label>
+      <p class="hint" id="familyDesc"></p>
+
+      <label>Prompt (description de l'image)
+        <textarea id="prompt" rows="5" placeholder="Ex : un chat roux tenant une pancarte « Bonjour », lumière douce, photo réaliste"></textarea>
+      </label>
+
+      <details>
+        <summary>Prompt négatif (optionnel)</summary>
+        <textarea id="negative" rows="2" placeholder="flou, basse qualité, texte illisible…"></textarea>
+      </details>
+
+      <div class="card">
+        <div class="card-title">Édition d'image (optionnel)</div>
+        <p class="hint">Ajoutez une ou plusieurs images de référence et décrivez la modification dans le prompt (ex : « change la couleur du ciel en rose »). État pour ce modèle : <span id="editStatus">?</span>.</p>
+        <input type="file" id="refs" accept="image/*" multiple>
+        <div id="refPreview" class="refs"></div>
+      </div>
+
+      <div class="grid2">
+        <label>Format
+          <select id="preset">
+            <option value="1024x1024">Carré 1:1 (1024×1024)</option>
+            <option value="1152x864">Paysage 4:3 (1152×864)</option>
+            <option value="864x1152">Portrait 3:4 (864×1152)</option>
+            <option value="1344x768">Paysage 16:9 (1344×768)</option>
+            <option value="768x1344">Portrait 9:16 (768×1344)</option>
+            <option value="768x768">Rapide 768×768</option>
+            <option value="custom">Personnalisé…</option>
+          </select>
+        </label>
+        <div class="grid2 compact">
+          <label>Largeur <input type="number" id="width" step="32" min="256" max="2048" value="1024"></label>
+          <label>Hauteur <input type="number" id="height" step="32" min="256" max="2048" value="1024"></label>
+        </div>
+      </div>
+
+      <div class="grid3">
+        <label>Étapes <span class="val" id="stepsVal">30</span>
+          <input type="range" id="steps" min="1" max="60" value="30">
+        </label>
+        <label>Guidage (CFG) <span class="val" id="cfgVal">6.0</span>
+          <input type="range" id="cfg" min="1" max="12" step="0.5" value="6">
+        </label>
+        <label>Seed (‑1 = aléatoire)
+          <input type="number" id="seed" value="-1">
+        </label>
+      </div>
+
+      <details>
+        <summary>Avancé</summary>
+        <label>Échantillonneur <select id="sampler"></select></label>
+      </details>
+
+      <div class="actions">
+        <button id="btnGenerate" class="primary big">✨ Générer</button>
+        <button id="btnCancel" class="danger hidden">■ Annuler</button>
+      </div>
+    </div>
+
+    <div class="col-right">
+      <div id="progressBox" class="card hidden">
+        <div class="row"><span id="phase">…</span><span id="elapsed"></span></div>
+        <div class="bar"><div id="bar"></div></div>
+        <div class="row small"><span id="stepTxt"></span><span id="eta"></span></div>
+        <details><summary>Journal</summary><pre id="log"></pre></details>
+      </div>
+      <div id="errorBox" class="notice error hidden"></div>
+      <div id="resultBox" class="result">
+        <div class="placeholder">L'image apparaîtra ici</div>
+      </div>
+      <div id="resultMeta" class="small"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== GALERIE ============================== -->
+<section id="tab-gallery" class="tab">
+  <div class="row">
+    <h2>Galerie</h2>
+    <button id="btnOpenOutputs" class="ghost">📁 Ouvrir le dossier</button>
+  </div>
+  <div id="gallery" class="gallery"></div>
+</section>
+
+<!-- ============================== CONFIGURATION ======================== -->
+<section id="tab-setup" class="tab">
+  <h2>Configuration</h2>
+
+  <div class="card">
+    <div class="card-title">1. Moteur (stable‑diffusion.cpp)</div>
+    <div id="engineInfo" class="small"></div>
+    <div class="row wrap">
+      <label>Variante <select id="flavor"></select></label>
+      <button id="btnEngine" class="primary">Installer / mettre à jour</button>
+    </div>
+    <p class="hint">Le binaire officiel précompilé est téléchargé depuis GitHub. NVIDIA → <b>cuda</b> (recommandé), AMD/Intel/autres → <b>vulkan</b>. Vous pouvez aussi copier votre propre <code>sd-cli</code> dans le dossier <code>bin/</code>.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title">2. Modèles <span class="small" id="diskFree"></span></div>
+    <p class="hint">Pour chaque modèle, cliquez « Télécharger » sur les fichiers marqués <b>recommandé</b>. Tout fichier <code>.gguf</code>/<code>.safetensors</code> copié manuellement dans <code>models/&lt;modèle&gt;/&lt;catégorie&gt;/</code> apparaît automatiquement — y compris vos propres variantes (fine‑tunes, autres quantifications) du modèle de diffusion, sélectionnables par le bouton radio.</p>
+    <div id="modelSections"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">3. Performance</div>
+    <label class="check"><input type="checkbox" id="offload"> Décharger les poids en RAM (<code>--offload-to-cpu</code>) — recommandé si ≤ 16 Go de VRAM</label>
+    <label class="check"><input type="checkbox" id="fa"> Flash attention (<code>--diffusion-fa</code>) — plus rapide et moins de VRAM sur CUDA</label>
+    <label class="check"><input type="checkbox" id="vaetiling"> VAE tiling (<code>--vae-tiling</code>) — pour les grandes images si manque de mémoire</label>
+    <label>Threads CPU (‑1 = auto) <input type="number" id="threads" value="-1" style="width:100px"></label>
+    <label>Arguments supplémentaires sd‑cli <input type="text" id="extra" placeholder="ex : --max-vram 14"></label>
+    <button id="btnSavePerf" class="primary">Enregistrer</button>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Téléchargements</div>
+    <div id="jobs"></div>
+    <button id="btnClearJobs" class="ghost">Effacer les terminés</button>
+  </div>
+</section>
+</main>
+
+<div id="lightbox" class="lightbox hidden"><img id="lightboxImg" alt=""><div id="lightboxCap"></div></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

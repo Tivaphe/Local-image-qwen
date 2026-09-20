@@ -1,0 +1,17 @@
+# environnement
+.venv/
+__pycache__/
+*.pyc
+config.json
+
+# données lourdes (jamais dans git)
+bin/*
+!bin/.gitkeep
+models/**
+!models/.gitkeep
+outputs/*
+!outputs/.gitkeep
+uploads/
+*.gguf
+*.safetensors
+*.part
