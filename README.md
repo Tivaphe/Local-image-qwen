@@ -102,6 +102,45 @@ Sous le capot, la commande envoyée à `sd-cli` est
 `--control-net <modèle> --control-image <squelette|contours> --control-strength <force>`
 (+ `-i <photo> --strength <force img2img>` en modification d'image).
 
+## Mannequin articulé — poser un personnage sans photo (onglet Générer)
+
+Quand aucune image de référence ne convient, la carte **🤸 Mannequin articulé** permet de **poser un
+personnage à la main** puis de s'en servir comme référence de pose. Tout est dessiné par l'application :
+**aucun fichier à télécharger**, aucune connexion (le module fait ~700 lignes de JavaScript et une
+projection 3D maison).
+
+1. **Poser** : faites glisser une articulation sur le canvas. Les os ont une **longueur fixe** : tirer le
+   poignet plie le coude (IK 2 os), tirer la cheville plie le genou — impossible d'étirer un membre.
+   - glisser dans le vide : tourner autour du personnage · **molette** : zoomer · **flèches** du clavier :
+     déplacer finement le point sélectionné · curseur **« Avancer / reculer »** : placer le membre en
+     profondeur (avant/arrière).
+   - seuls **poignet** et **cheville** déclenchent l'IK ; la **main** pivote autour du poignet, le **pied**
+     reste rigide (la pointe levée fait tourner le talon) et les points du visage suivent la tête.
+   - **↶ Annuler**, **⇄ Miroir**, **Face / Profil**, **⤢ Recadrer**, poses types (debout, marche, course,
+     assis, accroupi, danse, main levée).
+2. **Proportions** (dépliant « Proportions du corps ») : taille, carrure, largeur d'épaules, longueur de
+   jambes, longueur de bras, et morphologie (fine, athlétique, forte, féminine). Les longueurs d'os sont
+   recalculées — la pose déjà réglée est conservée.
+3. **Image à produire** :
+   - **Squelette OpenPose** → pour ControlNet (pose exacte, 18 points aux couleurs canoniques) ;
+   - **Mannequin ombré** ou **filaire** → image de référence pour Qwen‑Image‑2.1 / FLUX.2 klein ;
+   - **Carte de profondeur**, **Silhouette (masque)** → autres contrôles.
+4. **🎛️ Utiliser cette pose comme image de contrôle** : le rendu est envoyé au serveur et devient
+   l'image de contrôle de la carte ControlNet (le type est réglé automatiquement : « pose » pour le
+   squelette, « contours » pour les autres rendus). Il ne reste qu'à régler la force et à générer.
+5. **🎯 Générer une image de référence dans cette pose** : choisissez le moteur — c'est le même bouton
+   pour les deux voies :
+   - **SD 1.5 + ControlNet** : la pose est **imposée** (résolution ramenée à 768 px max pour ce modèle) ;
+   - **Qwen‑Image‑2.1 / FLUX.2 klein** : le mannequin part comme **image de référence** (`-r`) avec
+     l'instruction « Reproduis exactement la pose du personnage de l'image de référence ».
+6. **📎 Ajouter le dernier rendu aux références** : l'image obtenue est ajoutée au champ
+   « Édition d'image » pour être réutilisée en mode ✏️ Modification (décor, tenue, style…), sans
+   repasser par un fichier.
+
+Côté serveur, `app/mannequin.py` redessine la pose reçue (mêmes longueurs d'os, même projection que le
+navigateur) via `POST /api/mannequin/render` et l'enregistre dans `uploads/controls/`, donc l'image
+produite est une image de contrôle comme une autre (utilisable, réutilisable, supprimable).
+
 ## Télécharger les modèles (onglet Modèles)
 
 - **Installation en un clic** : pour un modèle, le pack contient le fichier de diffusion choisi,
@@ -166,7 +205,7 @@ de bons réglages de départ.
 
 ```bash
 pip install -r requirements-dev.txt     # pytest + httpx
-python -m pytest -q                     # 54 tests : catalogue, téléchargements, API, pose, commande sd-cli
+python -m pytest -q                     # 82 tests : catalogue, téléchargements, API, pose, mannequin, commande sd-cli
 
 npm install jsdom                       # une seule fois, pour les tests d'interface
 node tests/ui_render.mjs                # rejoue app.js sur un vrai /api/status (serveur lancé)
@@ -179,6 +218,13 @@ node tests/ui_render.mjs status.json    # …ou sur une réponse enregistrée
 Il rejoue aussi la carte ControlNet : refus expliqué sur les modèles « DiT », bascule en un clic vers
 SD 1.5 + ControlNet, détection automatique de la pose, glisser‑déposer d'une articulation
 (`POST /api/control/pose`) et envoi des paramètres de contrôle à `POST /api/generate`.
+
+Il vérifie enfin le **mannequin articulé** : dessin du pantin, pose à la souris (le membre suit et le
+coude se plie), **longueurs d'os conservées au 1e‑9 près** après chaque manipulation, curseurs de
+proportions, miroir, annulation, export (`POST /api/mannequin/render`) et les deux voies de génération
+(ControlNet avec `control_id`, ou modèle d'édition avec `ref_id`). `tests/canvas_shim.mjs` fournit un
+canvas 2D minimal (chemins, dégradés, transformations) et un encodeur PNG : les rendus du mannequin
+sont donc réellement rasterisés dans les tests Python (`tests/test_mannequin.py`), sans navigateur.
 
 `tests/data/fake-yolov8n-pose.onnx` est un **faux** réseau YOLOv8‑pose de 1,3 ko (généré par
 `tests/data/make_fake_onnx.py`) qui encode une pose connue : les tests valident ainsi le chargement ONNX,

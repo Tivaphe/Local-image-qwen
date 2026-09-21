@@ -300,27 +300,6 @@ def test_telechargement_dun_seul_fichier_de_controle(sandbox, file_server):
 
 
 # ------------------------------------------------------------------ API
-@pytest.fixture()
-def uploads(sandbox):
-    """Dossier de téléversements isolé (les images de contrôle y sont écrites)."""
-    d = sandbox.parent / "uploads"
-    (d / "controls").mkdir(parents=True, exist_ok=True)
-    return d
-
-
-@pytest.fixture()
-def client(sandbox, uploads, monkeypatch):
-    """Client HTTP isolé : modèles, téléversements et images de contrôle dans un dossier temporaire."""
-    from fastapi.testclient import TestClient
-
-    from app import server
-
-    monkeypatch.setattr(server, "MODELS_DIR", sandbox)
-    monkeypatch.setattr(server, "UPLOADS_DIR", uploads)
-    monkeypatch.setattr(server, "CONTROLS_DIR", uploads / "controls")
-    return TestClient(server.app)
-
-
 def _png(path: Path, width=640, height=480) -> Path:
     cv2.imwrite(str(path), np.full((height, width, 3), 30, dtype="uint8"))
     return path

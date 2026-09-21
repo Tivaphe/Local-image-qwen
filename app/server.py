@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import backend, config, downloads, generator, pose
+from . import backend, config, downloads, generator, mannequin, pose
 from .catalog import (
     CATEGORIES,
     DEFAULT_FAMILY,
@@ -33,7 +33,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/outputs", StaticFiles(directory=str(OUTPUTS_DIR)), name="outputs")
 app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
-_ASSET_RE = re.compile(r'(?P<url>/static/(?:app\.js|style\.css))(?P<q>["\'])')
+_ASSET_RE = re.compile(r'(?P<url>/static/(?:app\.js|mannequin\.js|style\.css))(?P<q>["\'])')
 
 
 def required_selections(family: str) -> list[str]:
@@ -46,7 +46,7 @@ def index():
     ancien app.js/style.css resté en cache ne masque des fonctions (onglet Modèles…)."""
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     stamps = {}
-    for name in ("app.js", "style.css"):
+    for name in ("app.js", "mannequin.js", "style.css"):
         p = STATIC_DIR / name
         stamps[f"/static/{name}"] = int(p.stat().st_mtime) if p.exists() else 0
     html = _ASSET_RE.sub(lambda m: f"{m.group('url')}?v={stamps.get(m.group('url'), 0)}{m.group('q')}", html)
@@ -113,6 +113,7 @@ def status():
         "disk_free_gb": round(shutil.disk_usage(str(MODELS_DIR)).free / 1e9, 1),
         "control": {
             "types": list(generator.CONTROL_TYPES),
+            "mannequin": {"modes": list(mannequin.MODES), "default_size": [768, 1024]},
             "pose": pose.available(),
             "pose_models": pose_models(),
             "pose_model_present": bool(pose_detectors),
@@ -360,6 +361,48 @@ def control_pose(p: PoseIn):
                         "width": int(p.width), "height": int(p.height)}}
 
 
+# --------------------------------------------------------------- mannequin
+class MannequinIn(BaseModel):
+    pose: dict = {}              # {articulation: [x, y, z]} en mètres
+    build: dict = {}             # {stature, shoulders, legs, arms, build}
+    camera: dict = {}            # {yaw, pitch, distance, target}
+    mode: str = "volume"         # volume | wireframe | openpose | depth | silhouette
+    width: int = 768
+    height: int = 1024
+
+
+def _render_mannequin(payload: dict, mode: str, width: int, height: int, tag: str) -> dict:
+    """Rend la pose du mannequin et renvoie le fichier de contrôle créé."""
+    try:
+        img = mannequin.render(payload, mode, width, height)
+    except mannequin.MannequinError as e:
+        raise HTTPException(400, str(e))
+    except pose.PoseError as e:
+        raise HTTPException(400, str(e))
+    name = f"{uuid.uuid4().hex}-mannequin-{tag}.png"
+    pose.save_image(img, CONTROLS_DIR / name)
+    return {"ok": True, "mode": mode, "kind": "pose" if mode == "openpose" else mode,
+            "control": {"id": f"controls/{name}", "url": _control_url(name),
+                        "width": int(width), "height": int(height)}}
+
+
+@app.post("/api/mannequin/render")
+def mannequin_render(m: MannequinIn):
+    """Rend le mannequin dans le mode demandé (volume, filaire, squelette, profondeur…)."""
+    width, height = max(256, m.width // 32 * 32), max(256, m.height // 32 * 32)
+    return _render_mannequin(m.model_dump(), m.mode, width, height, m.mode)
+
+
+@app.post("/api/mannequin/pose")
+def mannequin_pose(m: MannequinIn):
+    """Renvoie les longueurs d'os et les points 2D (diagnostic / partage de pose)."""
+    build, pose_data, _camera = mannequin.validate(m.model_dump())
+    return {"ok": True,
+            "lengths": {k: round(v, 4) for k, v in mannequin.bone_lengths(build).items()},
+            "points": mannequin.openpose_points(m.model_dump(), max(256, m.width), max(256, m.height)),
+            "modes": list(mannequin.MODES)}
+
+
 # -------------------------------------------------------------- generation
 @app.post("/api/generate")
 async def generate(
@@ -379,6 +422,7 @@ async def generate(
     use_init: bool = Form(False),
     strength: float = Form(0.45),
     init_id: str = Form(""),
+    ref_id: str = Form(""),          # image déjà présente (rendu du mannequin, image de la galerie)
     ref_images: list[UploadFile] = File(default=[]),
     init_image: UploadFile | None = File(default=None),
 ):
@@ -390,6 +434,8 @@ async def generate(
         if not f.filename:
             continue
         refs.append(str(await _save_upload(f)))
+    if ref_id:
+        refs.append(str(_safe_upload(ref_id)))
 
     # ControlNet : image de contrôle déjà préparée (pose détectée / contours) recadrée
     # exactement à la taille de génération

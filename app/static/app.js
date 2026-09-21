@@ -134,7 +134,8 @@ function renderAll() {
 
 // Les tests d'interface (tests/ui_render.mjs, jsdom) ont besoin de lire l'état du
 // contrôle : les déclarations `const` ne sont pas visibles depuis un autre script.
-window.__liq = { control: CONTROL, applyPoseEdits, drawPoseEditor };
+// (fusion et non remplacement : le module du mannequin expose aussi son état ici)
+window.__liq = Object.assign(window.__liq || {}, { control: CONTROL, applyPoseEdits, drawPoseEditor });
 }
 
 function renderEngine() {
@@ -450,6 +451,40 @@ $("#family").onchange = async (e) => {
 
 // ------------------------------------------------------------- mode générer / éditer
 let MODE = "generate";
+// Références ajoutées par l'application (mannequin, pose générée) : elles ne passent pas
+// par le champ fichier, on les garde donc à part et on les ajoute à l'envoi.
+let EXTRA_REFS = [];
+const refFiles = () => [...$("#refs").files, ...EXTRA_REFS];
+function renderRefPreviews() {
+  const box = $("#refPreview");
+  box.innerHTML = "";
+  [...$("#refs").files].forEach((f) => {
+    const img = document.createElement("img");
+    img.src = URL.createObjectURL(f);
+    box.appendChild(img);
+  });
+  EXTRA_REFS.forEach((f, i) => {
+    const wrap = document.createElement("div");
+    wrap.className = "ref";
+    wrap.style.position = "relative";
+    const img = document.createElement("img");
+    img.src = URL.createObjectURL(f);
+    const del = document.createElement("button");
+    del.className = "ghost";
+    del.textContent = "✖";
+    del.title = "Retirer cette référence";
+    del.onclick = () => { EXTRA_REFS.splice(i, 1); renderRefPreviews(); };
+    wrap.appendChild(img); wrap.appendChild(del);
+    box.appendChild(wrap);
+  });
+}
+function addExtraRef(file) {
+  if (!file) return false;
+  if (EXTRA_REFS.some((f) => f.name === file.name && f.size === file.size)) return false;
+  EXTRA_REFS.push(file);
+  renderRefPreviews();
+  return true;
+}
 function setMode(m) {
   MODE = m === "edit" ? "edit" : "generate";
   const editing = MODE === "edit";
@@ -483,11 +518,7 @@ function syncPreset() {
   $("#preset").value = [...$("#preset").options].some((o) => o.value === v) ? v : "custom";
 }
 $("#width").onchange = $("#height").onchange = syncPreset;
-$("#refs").onchange = () => {
-  const box = $("#refPreview");
-  box.innerHTML = "";
-  [...$("#refs").files].forEach((f) => { const img = document.createElement("img"); img.src = URL.createObjectURL(f); box.appendChild(img); });
-};
+$("#refs").onchange = () => renderRefPreviews();
 
 function showGenerateError(msg) {
   $("#errorBox").textContent = msg;
@@ -495,7 +526,7 @@ function showGenerateError(msg) {
 }
 
 $("#btnGenerate").onclick = async () => {
-  const refs = [...$("#refs").files];
+  const refs = refFiles();
   if (MODE === "edit" && !refs.length) {
     showGenerateError("Mode édition : ajoutez au moins une image de référence dans la carte « Édition d'image ».");
     return;
@@ -554,6 +585,8 @@ function pollGeneration() {
   clearTimeout(pollTimer);
   api("/api/generation").then((g) => {
     renderGeneration(g);
+    if (MANNEQUIN.pending && g.result && g.result !== MANNEQUIN.result) mqGenerationReady(g.result);
+    else if (MANNEQUIN.pending && g.error) { MANNEQUIN.pending = false; mqSetGenStatus("⚠️ " + g.error, "warn"); }
     if (g.running) pollTimer = setTimeout(pollGeneration, 800);
     else { $("#btnGenerate").disabled = !(STATUS && STATUS.ready); loadGallery(); }
   });
@@ -1063,8 +1096,545 @@ function clearControl() {
 
 bindPoseEditor();
 
+
+// ======================================================================
+//  Mannequin articulé — poser, puis exporter une image de référence
+// ======================================================================
+const MQ_JOINTS = {
+  hips: "bassin", spine: "bas du dos", chest: "poitrine", neck: "cou", head: "tête", head_top: "sommet du crâne",
+  nose: "nez", eye_l: "œil gauche", eye_r: "œil droit", ear_l: "oreille gauche", ear_r: "oreille droite",
+  shoulder_l: "épaule gauche", elbow_l: "coude gauche", wrist_l: "poignet gauche", hand_l: "main gauche",
+  shoulder_r: "épaule droite", elbow_r: "coude droit", wrist_r: "poignet droit", hand_r: "main droite",
+  hip_l: "hanche gauche", knee_l: "genou gauche", ankle_l: "cheville gauche", toe_l: "pied gauche (pointe)",
+  heel_l: "talon gauche",
+  hip_r: "hanche droite", knee_r: "genou droit", ankle_r: "cheville droite", toe_r: "pied droit (pointe)",
+  heel_r: "talon droit",
+};
+const MQ_BODY_LABELS = { neutre: "Neutre", fin: "Fine", athletique: "Athlétique", fort: "Forte", femme: "Féminine" };
+const MQ_PROMPTS = {
+  photo: "personne debout, tenue simple, fond gris uni, éclairage de studio, photo réaliste, corps entier visible",
+  sport: "athlète en tenue de sport, mouvement dynamique, fond neutre, photo réaliste, corps entier visible",
+  ville: "personne en tenue de ville, rue ensoleillée, photo réaliste, corps entier visible",
+  dessin: "illustration, personnage stylisé, fond clair, dessin net, corps entier visible",
+};
+const MANNEQUIN = {
+  rig: null, style: "volume", output: "openpose", selected: "wrist_l",
+  depthDone: 0, drag: null, history: [], render: null, renderKey: "",
+  pending: false, result: "", jsdomFallback: false,
+};
+
+const MQ_KIT = (typeof MannequinKit !== "undefined" && MannequinKit) ? MannequinKit : { BUILDS: {}, project: null };
+function mqCanvas() { return $("#mqCanvas"); }
+function mqScale(canvas) {
+  const w = canvas.getBoundingClientRect().width || canvas.width;
+  return canvas.width / (w || canvas.width);
+}
+
+function mqInit() {
+  const canvas = mqCanvas();
+  if (!canvas) return;
+  if (typeof Mannequin !== "function") {
+    MANNEQUIN.jsdomFallback = true;
+    return;
+  }
+  MANNEQUIN.rig = new Mannequin({ style: "volume" });
+  MANNEQUIN.rig.fitCamera(canvas.width, canvas.height);
+  const sel = $("#mqJoint");
+  Object.entries(MQ_JOINTS).forEach(([id, label]) => {
+    const o = document.createElement("option");
+    o.value = id; o.textContent = label;
+    sel.appendChild(o);
+  });
+  sel.value = MANNEQUIN.selected;
+  mqBind();
+  mqPaint();
+  mqFillEngines();
+}
+
+function mqInfo() {
+  const rig = MANNEQUIN.rig;
+  if (!rig) return;
+  const stature = rig.pose.head_top.y - Math.min(rig.pose.ankle_l.y, rig.pose.ankle_r.y);
+  $("#mqInfo").textContent = `Taille ${stature.toFixed(2).replace(".", ",")} m · pose « ${
+    rig.preset === "personnalise" ? "personnalisée" : rig.preset.replace("_", " ")} » · point : ${MQ_JOINTS[MANNEQUIN.selected] || MANNEQUIN.selected}`;
+}
+
+function mqPaint() {
+  const canvas = mqCanvas();
+  const rig = MANNEQUIN.rig;
+  if (!canvas || !rig) return;
+  let ctx = null;
+  try { ctx = canvas.getContext("2d"); } catch (e) { ctx = null; }
+  if (!ctx) { MANNEQUIN.jsdomFallback = true; return; }
+  ctx.save();
+  ctx.setTransform ? ctx.setTransform(1, 0, 0, 1, 0, 0) : null;
+  ctx.fillStyle = MANNEQUIN.style === "volume" ? "#0f1218" : "#0a0d13";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  rig.selected = MANNEQUIN.selected;
+  try {
+    rig.render(ctx, canvas.width, canvas.height, MANNEQUIN.style);
+  } catch (e) {
+    // contexte 2D incomplet (navigateur ancien, test sans canvas) : on garde l'application utilisable
+    MANNEQUIN.lastDrawError = e.message;
+  }
+  ctx.restore();
+  mqInfo();
+  window.__liq = Object.assign(window.__liq || {}, { mannequin: MANNEQUIN, mqPaint });
+}
+
+function mqSnapshot() {
+  if (!MANNEQUIN.rig) return;
+  MANNEQUIN.history.push(JSON.stringify(MANNEQUIN.rig.toJSON()));
+  if (MANNEQUIN.history.length > 40) MANNEQUIN.history.shift();
+}
+
+function mqUndo() {
+  const snap = MANNEQUIN.history.pop();
+  if (!snap || !MANNEQUIN.rig) { mqSetStatus("Rien à annuler."); return; }
+  MANNEQUIN.rig = Mannequin.fromJSON(JSON.parse(snap));
+  MANNEQUIN.rig.fitCamera(mqCanvas().width, mqCanvas().height);
+  mqPaint();
+  mqSetStatus("Dernier déplacement annulé.");
+}
+
+function mqSetStatus(msg, kind = "") {
+  const el = $("#mqStatus");
+  el.textContent = msg || "";
+  el.className = "small " + kind;
+}
+function mqSetGenStatus(msg, kind = "") {
+  const el = $("#mqGenStatus");
+  el.textContent = msg || "";
+  el.className = "small " + kind;
+}
+
+function mqPoint(ev, canvas) {
+  const r = canvas.getBoundingClientRect();
+  const k = mqScale(canvas);
+  return { x: (ev.clientX - r.left) * k, y: (ev.clientY - r.top) * k };
+}
+
+function mqBind() {
+  const canvas = mqCanvas();
+  canvas.tabIndex = 0;
+  canvas.addEventListener("pointerdown", (ev) => {
+    const rig = MANNEQUIN.rig;
+    if (!rig) return;
+    const pt = mqPoint(ev, canvas);
+    const joint = rig.jointAt(pt.x, pt.y, canvas.width, canvas.height, 30);
+    mqSnapshot();
+    if (joint) {
+      MANNEQUIN.selected = joint;
+      $("#mqJoint").value = joint;
+      MANNEQUIN.depthDone = 0;
+      $("#mqDepth").value = 0;
+      $("#mqDepthVal").textContent = "0";
+      MANNEQUIN.drag = { kind: "joint", joint };
+      mqPaint();
+    } else {
+      MANNEQUIN.drag = { kind: "orbit", x: ev.clientX, y: ev.clientY };
+      canvas.classList.add("dragging");
+    }
+    if (canvas.setPointerCapture && ev.pointerId !== undefined) {
+      try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* non supporté */ }
+    }
+  });
+  canvas.addEventListener("pointermove", (ev) => {
+    const rig = MANNEQUIN.rig;
+    if (!rig || !MANNEQUIN.drag) return;
+    if (MANNEQUIN.drag.kind === "joint") {
+      const pt = mqPoint(ev, canvas);
+      const joint = MANNEQUIN.drag.joint;
+      const opts = rig.cameraOptions(canvas.width, canvas.height);
+      const ref = MQ_KIT.project ? MQ_KIT.project(rig.pose[joint], opts).depth : opts.distance;
+      rig.moveJoint(joint, rig.screenToWorld(pt.x, pt.y, canvas.width, canvas.height, ref));
+      mqPaint();
+    } else {
+      rig.orbit(ev.clientX - MANNEQUIN.drag.x, ev.clientY - MANNEQUIN.drag.y);
+      MANNEQUIN.drag.x = ev.clientX; MANNEQUIN.drag.y = ev.clientY;
+      rig.fitCamera(canvas.width, canvas.height, 1.06);
+      mqPaint();
+    }
+  });
+  const stop = () => { MANNEQUIN.drag = null; canvas.classList.remove("dragging"); };
+  canvas.addEventListener("pointerup", stop);
+  canvas.addEventListener("pointercancel", stop);
+  canvas.addEventListener("wheel", (ev) => {
+    if (!MANNEQUIN.rig) return;
+    ev.preventDefault();
+    MANNEQUIN.rig.zoom(ev.deltaY > 0 ? 1.08 : 0.93);
+    mqPaint();
+  }, { passive: false });
+  canvas.addEventListener("keydown", (ev) => {
+    const steps = { ArrowLeft: [-0.03, 0], ArrowRight: [0.03, 0], ArrowUp: [0, 0.03], ArrowDown: [0, -0.03] };
+    const d = steps[ev.key];
+    if (!d || !MANNEQUIN.rig) return;
+    ev.preventDefault();
+    if (MANNEQUIN.history.length === 0 || ev.repeat === false) mqSnapshot();
+    const canvasEl = mqCanvas();
+    const rig = MANNEQUIN.rig;
+    const cur = rig.pose[MANNEQUIN.selected];
+    const right = { x: Math.cos(rig.camera.yaw), y: 0, z: -Math.sin(rig.camera.yaw) };
+    const up = { x: 0, y: 1, z: 0 };
+    const target = {
+      x: cur.x + d[0] * right.x + d[1] * up.x,
+      y: cur.y + d[0] * right.y + d[1] * up.y,
+      z: cur.z + d[0] * right.z + d[1] * up.z,
+    };
+    rig.moveJoint(MANNEQUIN.selected, target);
+    mqPaint();
+  });
+}
+
+$("#mqJoint").onchange = (e) => {
+  MANNEQUIN.selected = e.target.value;
+  MANNEQUIN.depthDone = 0;
+  $("#mqDepth").value = 0;
+  $("#mqDepthVal").textContent = "0";
+  mqPaint();
+};
+$("#mqDepth").oninput = (e) => {
+  const rig = MANNEQUIN.rig;
+  if (!rig) return;
+  $("#mqDepthVal").textContent = e.target.value;
+  const delta = (Number(e.target.value) - MANNEQUIN.depthDone) / 100 * 0.5;
+  MANNEQUIN.depthDone = Number(e.target.value);
+  if (!delta) return;
+  // avance ou recule le long de l'axe de la caméra
+  const yaw = rig.camera.yaw, pitch = rig.camera.pitch;
+  const dir = { x: Math.sin(yaw), y: -Math.cos(yaw) * Math.sin(pitch), z: Math.cos(yaw) * Math.cos(pitch) };
+  const cur = rig.pose[MANNEQUIN.selected];
+  if (!cur) return;
+  rig.moveJoint(MANNEQUIN.selected, { x: cur.x + dir.x * delta, y: cur.y + dir.y * delta, z: cur.z + dir.z * delta });
+  mqPaint();
+};
+$("#mqDepth").onpointerdown = () => mqSnapshot();
+
+$("#mqStyle").onchange = (e) => {
+  MANNEQUIN.style = e.target.value === "wireframe" ? "wireframe" : "volume";
+  if (MANNEQUIN.rig) MANNEQUIN.rig.setStyle(MANNEQUIN.style);
+  mqPaint();
+};
+$("#mqPreset").onchange = (e) => {
+  if (!MANNEQUIN.rig) return;
+  mqSnapshot();
+  MANNEQUIN.rig.applyPreset(e.target.value);
+  MANNEQUIN.rig.fitCamera(mqCanvas().width, mqCanvas().height);
+  mqPaint();
+  mqSetStatus(`Pose « ${e.target.selectedOptions[0].textContent} » appliquée — ajustez ensuite les articulations.`);
+};
+$("#btnMqUndo").onclick = () => mqUndo();
+$("#btnMqMirror").onclick = () => {
+  if (!MANNEQUIN.rig) return;
+  mqSnapshot();
+  MANNEQUIN.rig.mirror();
+  mqPaint();
+  mqSetStatus("Pose inversée (miroir gauche/droite).");
+};
+$("#btnMqFit").onclick = () => {
+  if (!MANNEQUIN.rig) return;
+  MANNEQUIN.rig.fitCamera(mqCanvas().width, mqCanvas().height);
+  mqPaint();
+};
+$("#btnMqFront").onclick = () => mqView(0, 0.02);
+$("#btnMqSide").onclick = () => mqView(Math.PI / 2, 0.02);
+function mqView(yaw, pitch) {
+  if (!MANNEQUIN.rig) return;
+  MANNEQUIN.rig.camera.yaw = yaw;
+  MANNEQUIN.rig.camera.pitch = pitch;
+  MANNEQUIN.rig.fitCamera(mqCanvas().width, mqCanvas().height);
+  mqPaint();
+}
+
+function mqBuildFromSliders() {
+  return {
+    stature: Number($("#mqStature").value) / 100,
+    build: Number($("#mqBulk").value) / 100,
+    shoulders: Number($("#mqShoulders").value) / 100,
+    legs: Number($("#mqLegs").value) / 100,
+    arms: Number($("#mqArms").value) / 100,
+  };
+}
+["#mqStature", "#mqBulk", "#mqShoulders", "#mqLegs", "#mqArms"].forEach((sel) => {
+  $(sel).oninput = () => {
+    $(sel + "Val").textContent = $(sel).value + " %";
+    if (!MANNEQUIN.rig) return;
+    MANNEQUIN.rig.setBuild(mqBuildFromSliders(), { keepPose: true });
+    mqPaint();
+  };
+  $(sel).onpointerdown = () => mqSnapshot();
+});
+$("#mqBody").onchange = (e) => {
+  const preset = MQ_KIT.BUILDS[e.target.value];
+  if (!preset || !MANNEQUIN.rig) return;
+  mqSnapshot();
+  const percent = (v) => Math.round(v * 100);
+  $("#mqStature").value = percent(preset.stature); $("#mqStatureVal").textContent = percent(preset.stature) + " %";
+  $("#mqBulk").value = percent(preset.build); $("#mqBulkVal").textContent = percent(preset.build) + " %";
+  $("#mqShoulders").value = percent(preset.shoulders); $("#mqShouldersVal").textContent = percent(preset.shoulders) + " %";
+  $("#mqLegs").value = percent(preset.legs); $("#mqLegsVal").textContent = percent(preset.legs) + " %";
+  $("#mqArms").value = percent(preset.arms); $("#mqArmsVal").textContent = percent(preset.arms) + " %";
+  MANNEQUIN.rig.setBuild(mqBuildFromSliders(), { keepPose: true });
+  mqPaint();
+  mqSetStatus(`Morphologie « ${MQ_BODY_LABELS[e.target.value] || e.target.value} » appliquée.`);
+};
+
+// ------------------------------------------------------------- export API
+function mqMode() { return $("#mqOutput").value || "volume"; }
+function mqSizeValue() {
+  const [w, h] = ($("#mqSize").value || "768x1024").split("x").map(Number);
+  return { width: w, height: h };
+}
+function mqPayload(mode, size) {
+  const goal = size || mqSizeValue();
+  const data = MANNEQUIN.rig.toJSON();
+  return {
+    pose: data.pose, build: data.build, mode: mode || mqMode(),
+    width: goal.width, height: goal.height,
+    camera: { yaw: data.camera.yaw, pitch: data.camera.pitch, target: [0, MANNEQUIN.rig.camera.target.y, 0] },
+  };
+}
+function mqNeedsRender(mode) {
+  const key = JSON.stringify([MANNEQUIN.rig.toJSON(), mode, mqSizeValue()]);
+  return !MANNEQUIN.render || MANNEQUIN.renderKey !== key;
+}
+async function mqRender(mode) {
+  const goal = mode || mqMode();
+  const payload = mqPayload(goal);
+  const r = await postJSON("/api/mannequin/render", payload);
+  MANNEQUIN.render = r.control;
+  MANNEQUIN.renderKey = JSON.stringify([MANNEQUIN.rig.toJSON(), goal, mqSizeValue()]);
+  MANNEQUIN.renderMode = goal;
+  const img = $("#mqPreview");
+  img.src = r.control.url + "?t=" + Date.now();
+  img.classList.remove("hidden");
+  img.onclick = () => openLightbox(r.control.url, "Mannequin — " + goal);
+  return r.control;
+}
+$("#btnMqPreview").onclick = async () => {
+  const btn = $("#btnMqPreview");
+  btn.disabled = true;
+  mqSetStatus("Rendu de la pose…");
+  try {
+    const c = await mqRender();
+    mqSetStatus(`Rendu ${c.width}×${c.height} prêt — cliquez sur l'image pour l'agrandir.`, "ok");
+  } catch (e) {
+    mqSetStatus("⚠️ " + e.message, "warn");
+  }
+  btn.disabled = false;
+};
+
+$("#btnMqControl").onclick = async () => {
+  const btn = $("#btnMqControl");
+  btn.disabled = true;
+  mqSetStatus("Rendu de la pose pour ControlNet…");
+  try {
+    const mode = mqMode();
+    const c = await mqRender(mode);
+    mqApplyControl(c, mode);
+  } catch (e) {
+    mqSetStatus("⚠️ " + e.message, "warn");
+  }
+  btn.disabled = false;
+};
+
+function mqApplyControl(control, mode) {
+  const kind = mode === "openpose" ? "pose" : "canny";
+  CONTROL.type = kind;
+  CONTROL.id = control.id;
+  CONTROL.url = control.url + "?t=" + Date.now();
+  CONTROL.width = control.width;
+  CONTROL.height = control.height;
+  CONTROL.persons = [];
+  CONTROL.detected = null;
+  CONTROL.editor = false;
+  CONTROL.sourceUrl = $("#mqPreview").src;
+  CONTROL.status = mode === "openpose"
+    ? "Pose du mannequin (squelette OpenPose) utilisée comme contrôle."
+    : `Rendu « ${mode} » du mannequin utilisé comme contrôle (contours Canny).`;
+  if ($("#controlType")) $("#controlType").value = kind;
+  renderControl();
+  if (!controlCapable()) {
+    mqSetStatus("⚠️ Le modèle actif n'utilise pas ControlNet. L'image est prête : utilisez « SD 1.5 + ControlNet » pour "
+      + "la pose exacte, ou envoyez-la comme référence avec un modèle d'édition.", "warn");
+  } else if (!controlnetPresent(kind)) {
+    mqSetStatus("⚠️ Modèle ControlNet manquant : téléchargez-le dans l'onglet Modèles (famille « SD 1.5 + ControlNet »).", "warn");
+  } else {
+    mqSetStatus("✔ Pose envoyée dans la carte « Personnages, pose et composition » : forcez le contrôle puis cliquez sur Générer.", "ok");
+  }
+  const card = $("#poseCard");
+  if (card && card.scrollIntoView) card.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+// ---------------------------------------------------- génération directe
+function mqFillEngines() {
+  const sel = $("#mqEngine");
+  if (!sel || !STATUS || !STATUS.families) return;
+  const cat = controlFamily();
+  const items = [];
+  if (cat) {
+    items.push({ id: cat.id, label: `${cat.name} — pose exacte (ControlNet)`, ready: !!(STATUS.families_status[cat.id] || {}).ready });
+  }
+  STATUS.families.filter((f) => !f.supports_controlnet).forEach((f) => {
+    items.push({ id: f.id, label: `${f.name} — image de référence`, ready: !!(STATUS.families_status[f.id] || {}).ready });
+  });
+  const current = sel.value;
+  sel.innerHTML = "";
+  items.forEach((it) => {
+    const o = document.createElement("option");
+    o.value = it.id;
+    o.textContent = it.label + (it.ready ? "" : " (fichiers à télécharger)");
+    sel.appendChild(o);
+  });
+  if (items.some((i) => i.id === current)) sel.value = current;
+  else if (STATUS.config && items.some((i) => i.id === STATUS.config.family)) sel.value = STATUS.config.family;
+  mqEngineHint();
+}
+$("#mqEngine").onchange = () => mqEngineHint();
+function mqEngineHint() {
+  const id = $("#mqEngine").value;
+  const fam = famById(id);
+  const ready = STATUS && STATUS.families_status ? (STATUS.families_status[id] || {}).ready : false;
+  const el = $("#mqEngineHint");
+  if (!fam) { el.textContent = ""; return; }
+  if (fam.supports_controlnet) {
+    el.textContent = (ready ? "✔ Fichiers installés." : "⬇ Fichiers manquants : passez par l'onglet Modèles (famille "
+      + fam.name + "). ")
+      + " La pose du mannequin est envoyée comme contrôle : le résultat suit exactement le squelette. "
+      + "Sortie recommandée ci-dessus : « Squelette OpenPose » (ou « mannequin filaire » pour les contours).";
+  } else {
+    el.textContent = (ready ? "✔ Fichiers installés." : "⬇ Fichiers manquants : passez par l'onglet Modèles (famille "
+      + fam.name + "). ")
+      + " Ce modèle ne peut pas utiliser ControlNet : le mannequin est envoyé comme image de référence "
+      + "avec l'instruction de pose. Sortie recommandée : « Mannequin ombré ».";
+  }
+}
+
+$("#mqPromptPreset").onchange = (e) => {
+  const txt = MQ_PROMPTS[e.target.value];
+  if (txt) $("#mqPrompt").value = txt;
+};
+
+function mqSd15Size(w, h) {
+  const max = Math.max(w, h);
+  if (max <= 768) return { width: w, height: h };
+  const k = 768 / max;
+  return { width: Math.max(512, Math.round(w * k / 64) * 64), height: Math.max(512, Math.round(h * k / 64) * 64) };
+}
+
+$("#btnMqGenerate").onclick = async () => {
+  const btn = $("#btnMqGenerate");
+  const engine = $("#mqEngine").value;
+  const fam = famById(engine);
+  const prompt = ($("#mqPrompt").value || "").trim();
+  if (!fam) { mqSetGenStatus("⚠️ Aucun moteur disponible.", "warn"); return; }
+  if (!prompt) { mqSetGenStatus("⚠️ Décrivez l'image souhaitée (par exemple « athlète en tenue de sport, studio »).", "warn"); return; }
+  if (MANNEQUIN.pending) { mqSetGenStatus("⏳ Une génération est déjà en cours.", "warn"); return; }
+  btn.disabled = true;
+  try {
+    const mode = mqMode();
+    mqSetGenStatus("Préparation du rendu du mannequin…");
+    if (fam.supports_controlnet) {
+      if (!controlnetPresent(mode === "openpose" ? "pose" : "canny")) {
+        throw new Error("modèle ControlNet manquant : téléchargez-le dans l'onglet Modèles (famille « " + fam.name + " »).");
+      }
+      const c = await mqRender(mode);
+      mqApplyControl(c, mode);
+      const size = mqSd15Size(c.width, c.height);
+      const fd = new FormData();
+      fd.append("prompt", prompt);
+      fd.append("negative_prompt", "flou, déformé, mauvaise anatomie, membres en trop, texte, filigrane");
+      fd.append("width", size.width);
+      fd.append("height", size.height);
+      fd.append("steps", $("#steps").value);
+      fd.append("cfg_scale", $("#cfg").value);
+      fd.append("sampler", $("#sampler").value);
+      fd.append("seed", $("#seed").value);
+      fd.append("mode", "generate");
+      fd.append("control_type", mode === "openpose" ? "pose" : "canny");
+      fd.append("control_id", c.id);
+      fd.append("control_strength", $("#controlStrength").value);
+      const cn = controlnetFor(mode === "openpose" ? "pose" : "canny");
+      if (cn) fd.append("control_net", cn.id);
+      await api("/api/generate", { method: "POST", body: fd });
+      mqSetGenStatus(`Génération lancée avec ${fam.name} (${size.width}×${size.height}) : la pose est imposée par le mannequin.`);
+    } else {
+      const c = await mqRender(mode);
+      if (STATUS.config.family !== engine) {
+        await postJSON("/api/config", { family: engine });
+        await refreshStatus();
+        mqFillEngines();
+      }
+      const size = mqSizeValue();
+      const instruction = $("#mqPoseInstruction").checked
+        ? "Reproduis exactement la pose du personnage de l'image de référence. " : "";
+      const fd = new FormData();
+      fd.append("prompt", instruction + prompt);
+      fd.append("negative_prompt", "flou, déformé, mauvaise anatomie, membres en trop, texte, filigrane");
+      fd.append("width", size.width);
+      fd.append("height", size.height);
+      fd.append("steps", $("#steps").value);
+      fd.append("cfg_scale", $("#cfg").value);
+      fd.append("sampler", $("#sampler").value);
+      fd.append("seed", $("#seed").value);
+      fd.append("mode", "generate");
+      fd.append("ref_id", c.id);
+      await api("/api/generate", { method: "POST", body: fd });
+      mqSetGenStatus(`Génération lancée avec ${fam.name} : le mannequin sert d'image de référence (pose).`);
+    }
+    MANNEQUIN.pending = true;
+    MANNEQUIN.result = "";
+    $("#btnMqRef").disabled = true;
+    pollGeneration();
+  } catch (e) {
+    mqSetGenStatus("⚠️ " + e.message, "warn");
+  }
+  btn.disabled = false;
+};
+
+function mqGenerationReady(file) {
+  MANNEQUIN.pending = false;
+  MANNEQUIN.result = file;
+  const box = $("#mqResult");
+  box.innerHTML = "";
+  const img = document.createElement("img");
+  img.src = "/outputs/" + file;
+  img.title = "Agrandir";
+  img.onclick = () => openLightbox("/outputs/" + file, file);
+  box.appendChild(img);
+  $("#btnMqRef").disabled = false;
+  mqSetGenStatus("✔ Image générée : " + file + ". Ajoutez-la aux références pour vous en servir comme pose de départ.", "ok");
+}
+
+$("#btnMqRef").onclick = async () => {
+  if (!MANNEQUIN.result) return;
+  const btn = $("#btnMqRef");
+  btn.disabled = true;
+  try {
+    const r = await fetch("/outputs/" + MANNEQUIN.result + "?t=" + Date.now());
+    const blob = await r.blob();
+    const file = new File([blob], MANNEQUIN.result, { type: blob.type || "image/png" });
+    const added = addExtraRef(file);
+    mqSetGenStatus(added
+      ? `📎 « ${MANNEQUIN.result} » ajoutée aux références (champ « Édition d'image »). Passez en ✏️ Modification pour la réutiliser, ou relancez une génération.`
+      : "Cette image est déjà dans les références.", added ? "ok" : "warn");
+    if (added) {
+      const refs = $("#refs");
+      if (refs && refs.scrollIntoView) refs.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  } catch (e) {
+    mqSetGenStatus("⚠️ " + e.message, "warn");
+  }
+  btn.disabled = false;
+};
+
+mqInit();
+
 // ------------------------------------------------------------- boucle
-refreshStatus().then(() => { if (STATUS && STATUS.generation.running) pollGeneration(); });
+refreshStatus().then(() => {
+  mqFillEngines();
+  if (STATUS && STATUS.generation.running) pollGeneration();
+});
 setInterval(() => {
   if (!STATUS) return;
   const busy = STATUS.jobs.some((j) => j.status === "running");

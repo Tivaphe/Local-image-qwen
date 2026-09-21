@@ -130,6 +130,144 @@
         </div>
       </div>
 
+
+      <div class="card" id="mannequinCard">
+        <div class="card-title">🤸 Mannequin articulé — poser un personnage à la main</div>
+        <p class="hint">Faites glisser les articulations : les os gardent leurs longueurs (coudes et genoux se plient
+          comme sur un vrai pantin), on ne peut donc pas déformer le corps. Rien à télécharger : tout est dessiné par
+          l'application, puis exporté en image de contrôle (ControlNet) ou en image de référence (Qwen‑Image, FLUX.2 klein).</p>
+
+        <div class="grid3">
+          <label>Rendu
+            <select id="mqStyle">
+              <option value="volume">3D ombré</option>
+              <option value="wireframe">2D filaire</option>
+            </select>
+          </label>
+          <label>Pose type
+            <select id="mqPreset">
+              <option value="debout">Debout</option>
+              <option value="marche">Marche</option>
+              <option value="course">Course</option>
+              <option value="assis">Assis</option>
+              <option value="accroupi">Accroupi</option>
+              <option value="danse">Danse</option>
+              <option value="main_levee">Main levée</option>
+            </select>
+          </label>
+          <label>Point réglable
+            <select id="mqJoint"></select>
+          </label>
+        </div>
+
+        <canvas id="mqCanvas" width="560" height="720" class="mannequin-canvas" title="Glissez une articulation pour la poser"></canvas>
+        <div class="row wrap">
+          <span class="small">Glissez à vide pour tourner la vue · molette pour zoomer · glissez un point pour poser ·
+            flèches du clavier pour déplacer le point sélectionné.</span>
+        </div>
+        <div class="row wrap">
+          <button class="ghost" id="btnMqUndo">↶ Annuler</button>
+          <button class="ghost" id="btnMqMirror">⇄ Miroir</button>
+          <button class="ghost" id="btnMqFront">Face</button>
+          <button class="ghost" id="btnMqSide">Profil</button>
+          <button class="ghost" id="btnMqFit">⤢ Recadrer</button>
+          <span class="small" id="mqInfo"></span>
+        </div>
+
+        <label>Avancer / reculer le point sélectionné <span class="val" id="mqDepthVal">0</span>
+          <input type="range" id="mqDepth" min="-100" max="100" step="1" value="0">
+        </label>
+
+        <details id="mqBuildBox">
+          <summary>Proportions du corps (taille, carrure, jambes…)</summary>
+          <div class="grid2">
+            <label>Taille <span class="val" id="mqStatureVal">100 %</span>
+              <input type="range" id="mqStature" min="80" max="120" step="1" value="100">
+            </label>
+            <label>Carrure (gabarit) <span class="val" id="mqBulkVal">100 %</span>
+              <input type="range" id="mqBulk" min="75" max="145" step="1" value="100">
+            </label>
+            <label>Largeur d'épaules <span class="val" id="mqShouldersVal">100 %</span>
+              <input type="range" id="mqShoulders" min="70" max="140" step="1" value="100">
+            </label>
+            <label>Longueur de jambes <span class="val" id="mqLegsVal">100 %</span>
+              <input type="range" id="mqLegs" min="80" max="120" step="1" value="100">
+            </label>
+            <label>Longueur de bras <span class="val" id="mqArmsVal">100 %</span>
+              <input type="range" id="mqArms" min="80" max="120" step="1" value="100">
+            </label>
+            <label>Morphologie
+              <select id="mqBody">
+                <option value="neutre">Neutre</option>
+                <option value="fin">Fine</option>
+                <option value="athletique">Athlétique</option>
+                <option value="fort">Forte</option>
+                <option value="femme">Féminine</option>
+              </select>
+            </label>
+          </div>
+        </details>
+
+        <div class="grid2">
+          <label>Image à produire
+            <select id="mqOutput">
+              <option value="openpose">Squelette OpenPose — pour ControlNet (pose exacte)</option>
+              <option value="volume" selected>Mannequin ombré — image de référence (Qwen‑Image, FLUX.2 klein)</option>
+              <option value="wireframe">Mannequin filaire — contours nets</option>
+              <option value="depth">Carte de profondeur</option>
+              <option value="silhouette">Silhouette (masque)</option>
+            </select>
+          </label>
+          <label>Résolution
+            <select id="mqSize">
+              <option value="512x768">512×768 (portrait)</option>
+              <option value="768x512">768×512 (paysage)</option>
+              <option value="768x768">768×768 (carré)</option>
+              <option value="768x1024" selected>768×1024 (portrait HD)</option>
+              <option value="1024x768">1024×768 (paysage HD)</option>
+              <option value="1024x1024">1024×1024 (carré HD)</option>
+            </select>
+          </label>
+        </div>
+        <div class="row wrap">
+          <button class="ghost" id="btnMqPreview">👁️ Aperçu du rendu</button>
+          <button class="primary" id="btnMqControl">🎛️ Utiliser cette pose comme image de contrôle</button>
+        </div>
+        <div class="small" id="mqStatus"></div>
+        <img id="mqPreview" class="control-preview hidden" alt="">
+
+        <div class="card inset" id="mqGenCard">
+          <div class="card-title">🎯 Générer une image de référence dans cette pose</div>
+          <p class="hint">L'image obtenue est une image comme les autres : à la fin de la génération, ajoutez-la aux
+            références d'une des deux façons ci-après, puis modifiez-la comme vous voulez (décor, tenue, style…).</p>
+          <label>Moteur
+            <select id="mqEngine"></select>
+          </label>
+          <p class="hint" id="mqEngineHint"></p>
+          <label>Description souhaitée
+            <textarea id="mqPrompt" rows="3" placeholder="ex : athlète en tenue de sport, fond gris uni, éclairage de studio, photo réaliste"></textarea>
+          </label>
+          <div class="row wrap">
+            <label class="check">Exemples
+              <select id="mqPromptPreset" style="width:auto">
+                <option value="">— choisir —</option>
+                <option value="photo">Photo réaliste en studio</option>
+                <option value="sport">Athlète en action</option>
+                <option value="ville">Tenue de ville, rue ensoleillée</option>
+                <option value="dessin">Illustration / dessin animé</option>
+              </select>
+            </label>
+            <label class="check"><input type="checkbox" id="mqPoseInstruction" checked> Ajouter l'instruction de pose au prompt</label>
+          </div>
+          <div class="row wrap">
+            <button class="primary" id="btnMqGenerate">🎯 Générer l'image</button>
+            <button class="ghost" id="btnMqRef" disabled>📎 Ajouter le dernier rendu aux références</button>
+          </div>
+          <div class="small" id="mqGenStatus"></div>
+          <div id="mqResult" class="refs"></div>
+        </div>
+      </div>
+
       <div class="grid2" id="formatRow">
         <label>Format
           <select id="preset">
@@ -271,6 +409,7 @@
 </main>
 
 <div id="lightbox" class="lightbox hidden"><img id="lightboxImg" alt=""><div id="lightboxCap"></div></div>
+<script src="/static/mannequin.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

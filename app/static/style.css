@@ -104,3 +104,19 @@ details.files>summary{cursor:pointer;color:var(--muted);font-size:13.5px}
 .tag.kpt{background:#2b2550;color:#c9bbff;margin-left:4px}
 #controlStatus.ok{color:var(--ok)}
 #controlStatus.warn{color:var(--warn)}
+
+/* ---------------- mannequin articulé ---------------- */
+#mannequinCard .card.inset{background:var(--panel2);border-radius:10px;padding:12px 14px}
+.mannequin-canvas{width:100%;max-width:560px;height:auto;border-radius:10px;background:#0f1218;border:1px solid var(--border);
+  cursor:grab;touch-action:none;display:block;margin:10px 0}
+.mannequin-canvas.dragging{cursor:grabbing}
+#mqStatus.ok{color:var(--ok)}
+#mqStatus.warn{color:var(--warn)}
+#mqGenStatus.ok{color:var(--ok)}
+#mqGenStatus.warn{color:var(--warn)}
+#mqInfo{color:#c9bbff}
+#mqResult img{height:110px}
+#mqResult .ref{position:relative}
+#mqResult .ref button{position:absolute;top:2px;right:2px;padding:0 5px;font-size:11px;line-height:16px}
+#mqBuildBox{margin:10px 0}
+#mqBuildBox>summary{cursor:pointer;color:var(--muted);font-size:13.5px}

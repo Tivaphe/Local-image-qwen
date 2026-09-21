@@ -48,6 +48,27 @@ def fake_engine(tmp_path, monkeypatch):
     return exe
 
 
+@pytest.fixture()
+def uploads(sandbox):
+    """Dossier de téléversements isolé (les images de contrôle y sont écrites)."""
+    d = sandbox.parent / "uploads"
+    (d / "controls").mkdir(parents=True, exist_ok=True)
+    return d
+
+
+@pytest.fixture()
+def client(sandbox, uploads, monkeypatch):
+    """Client HTTP isolé : modèles, téléversements et images de contrôle dans un dossier temporaire."""
+    from fastapi.testclient import TestClient
+
+    from app import server
+
+    monkeypatch.setattr(server, "MODELS_DIR", sandbox)
+    monkeypatch.setattr(server, "UPLOADS_DIR", uploads)
+    monkeypatch.setattr(server, "CONTROLS_DIR", uploads / "controls")
+    return TestClient(server.app)
+
+
 class _Quiet(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *args):  # silence
         pass
