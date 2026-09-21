@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import uuid
 from pathlib import Path
@@ -12,7 +13,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import backend, config, downloads, generator
-from .catalog import CATEGORIES, DEFAULT_FAMILY, FAMILIES, MODEL_EXTENSIONS
+from .catalog import (
+    CATEGORIES,
+    DEFAULT_FAMILY,
+    FAMILIES,
+    MODEL_EXTENSIONS,
+    pack_total_gb,
+)
 from .paths import MODELS_DIR, OUTPUTS_DIR, STATIC_DIR, UPLOADS_DIR, ensure_dirs, model_dir
 
 ensure_dirs()
@@ -21,10 +28,20 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/outputs", StaticFiles(directory=str(OUTPUTS_DIR)), name="outputs")
 app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
+_ASSET_RE = re.compile(r'(?P<url>/static/(?:app\.js|style\.css))(?P<q>["\'])')
+
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    """Page principale. Les URL des assets sont horodatées pour éviter qu'un
+    ancien app.js/style.css resté en cache ne masque des fonctions (onglet Modèles…)."""
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    stamps = {}
+    for name in ("app.js", "style.css"):
+        p = STATIC_DIR / name
+        stamps[f"/static/{name}"] = int(p.stat().st_mtime) if p.exists() else 0
+    html = _ASSET_RE.sub(lambda m: f"{m.group('url')}?v={stamps.get(m.group('url'), 0)}{m.group('q')}", html)
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
 # ------------------------------------------------------------------ status
@@ -35,6 +52,10 @@ def _list_models(family: str, category: str) -> list[dict]:
         if p.is_file() and p.suffix.lower() in MODEL_EXTENSIONS:
             out.append({"name": p.name, "size_gb": round(p.stat().st_size / 1e9, 2)})
     return out
+
+
+def _installed_gb(local: dict[str, list[dict]]) -> float:
+    return round(sum(m["size_gb"] for models in local.values() for m in models), 2)
 
 
 @app.get("/api/status")
@@ -55,20 +76,31 @@ def status():
     sel = cfg["selections"][fam]
     ready = all(sel.get(k) for k in ("diffusion", "text_encoder", "vae"))
     families_status = {
-        f: {"ready": all(cfg["selections"][f].get(k) for k in ("diffusion", "text_encoder", "vae")),
-            "edit_ready": (not FAMILIES[f]["edit_requires_vision"]) or bool(cfg["selections"][f].get("vision"))}
+        f: {
+            "ready": all(cfg["selections"][f].get(k) for k in ("diffusion", "text_encoder", "vae")),
+            "edit_ready": (not FAMILIES[f]["edit_requires_vision"]) or bool(cfg["selections"][f].get("vision")),
+            "installed_gb": _installed_gb(local[f]),
+            "file_count": sum(len(v) for v in local[f].values()),
+        }
         for f in FAMILIES
     }
+    families = []
+    for f in FAMILIES:
+        data = dict(FAMILIES[f])
+        data["pack_total_gb"] = pack_total_gb(f)
+        data["installed_gb"] = families_status[f]["installed_gb"]
+        families.append(data)
     return {
         "engine": backend.installed_info(),
         "models": local,
-        "families": [{k: v for k, v in FAMILIES[f].items()} for f in FAMILIES],
+        "families": families,
         "families_status": families_status,
         "config": cfg,
         "ready": ready and backend.find_binary() is not None,
         "edit_ready": families_status[fam]["edit_ready"],
         "samplers": generator.SAMPLERS,
         "disk_free_gb": round(shutil.disk_usage(str(MODELS_DIR)).free / 1e9, 1),
+        "paths": {"models": str(MODELS_DIR), "outputs": str(OUTPUTS_DIR)},
         "jobs": downloads.list_jobs(),
         "generation": generator.state(),
     }
@@ -111,11 +143,33 @@ class DownloadIn(BaseModel):
 
 @app.post("/api/download")
 def download(d: DownloadIn):
+    """Télécharge un fichier précis (catalogue ou URL personnalisée)."""
+    if d.family not in FAMILIES or d.category not in CATEGORIES:
+        raise HTTPException(400, "famille ou catégorie inconnue")
     try:
         jid = downloads.start_model_download(d.family, d.category, d.file_id, d.url)
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"job": jid}
+
+
+class InstallIn(BaseModel):
+    family: str = DEFAULT_FAMILY
+    diffusion: str = ""          # identifiant du fichier de diffusion (quantification)
+    text_encoder: str = ""       # identifiant de l'encodeur de texte
+    include_vision: bool = True  # télécharger aussi l'encodeur de vision (édition d'image)
+
+
+@app.post("/api/install")
+def install(i: InstallIn):
+    """Installation complète en un clic : génération **et** édition d'image."""
+    if i.family not in FAMILIES:
+        raise HTTPException(400, "famille inconnue")
+    try:
+        jid = downloads.start_family_install(i.family, i.diffusion, i.text_encoder, i.include_vision)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"job": jid, "jobs": downloads.list_jobs()}
 
 
 class EngineIn(BaseModel):
@@ -138,6 +192,16 @@ def jobs_clear():
     return {"ok": True}
 
 
+@app.post("/api/jobs/{job_id}/cancel")
+def job_cancel(job_id: str):
+    return {"cancelled": downloads.cancel(job_id)}
+
+
+@app.post("/api/jobs/cancel-all")
+def jobs_cancel_all():
+    return {"cancelled": downloads.cancel_all()}
+
+
 @app.delete("/api/models/{family}/{category}/{name}")
 def delete_model(family: str, category: str, name: str):
     if family not in FAMILIES or category not in CATEGORIES or "/" in name or "\\" in name:
@@ -145,6 +209,7 @@ def delete_model(family: str, category: str, name: str):
     p = model_dir(family, category) / name
     if p.exists():
         p.unlink()
+    p.with_suffix(p.suffix + ".part").unlink(missing_ok=True)
     return {"ok": True}
 
 

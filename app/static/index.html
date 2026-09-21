@@ -11,18 +11,28 @@
   <div class="brand">🖼️ <b>Local Image Qwen</b> <span class="sub">Qwen‑Image‑2.1 · FLUX.2 klein · GGUF · 100 % local</span></div>
   <nav>
     <button data-tab="generate" class="active">Générer</button>
+    <button data-tab="models">Modèles <span id="modelsBadge" class="badge hidden">!</span></button>
     <button data-tab="gallery">Galerie</button>
-    <button data-tab="setup">Configuration <span id="setupBadge" class="badge hidden">!</span></button>
+    <button data-tab="setup">Configuration</button>
   </nav>
 </header>
 
 <main>
+<div id="renderError" class="notice error hidden"></div>
+
 <!-- ============================== GÉNÉRER ============================== -->
 <section id="tab-generate" class="tab active">
   <div class="cols">
     <div class="col-left">
+      <div class="modes">
+        <button id="modeGen" class="seg active">🎨 Générer une image</button>
+        <button id="modeEdit" class="seg">✏️ Éditer une image</button>
+      </div>
+
       <div id="notReady" class="notice hidden">
-        ⚠️ L'application n'est pas encore prête. Allez dans <a href="#" data-goto="setup">Configuration</a> pour installer le moteur et télécharger les modèles.
+        ⚠️ L'application n'est pas encore prête.
+        <button class="link" data-goto="models">Ouvrir l'onglet Modèles</button> pour installer le moteur et
+        télécharger un modèle en un clic (génération + édition d'image).
       </div>
 
       <label>Modèle
@@ -30,7 +40,7 @@
       </label>
       <p class="hint" id="familyDesc"></p>
 
-      <label>Prompt (description de l'image)
+      <label>Prompt (description de l'image, ou instruction de modification en édition)
         <textarea id="prompt" rows="5" placeholder="Ex : un chat roux tenant une pancarte « Bonjour », lumière douce, photo réaliste"></textarea>
       </label>
 
@@ -39,14 +49,19 @@
         <textarea id="negative" rows="2" placeholder="flou, basse qualité, texte illisible…"></textarea>
       </details>
 
-      <div class="card">
-        <div class="card-title">Édition d'image (optionnel)</div>
-        <p class="hint">Ajoutez une ou plusieurs images de référence et décrivez la modification dans le prompt (ex : « change la couleur du ciel en rose »). État pour ce modèle : <span id="editStatus">?</span>.</p>
+      <div class="card" id="editCard">
+        <div class="card-title">✏️ Édition d'image — images de référence</div>
+        <p class="hint">Ajoutez une ou plusieurs images de référence puis décrivez la modification dans le prompt
+          (ex : « change la couleur du ciel en rose »). État pour ce modèle : <span id="editStatus">?</span></p>
+        <p class="hint" id="editInfo"></p>
+        <div id="editFix" class="hidden">
+          <button class="primary" id="btnFixEdit">⬇ Télécharger l'encodeur de vision (édition)</button>
+        </div>
         <input type="file" id="refs" accept="image/*" multiple>
         <div id="refPreview" class="refs"></div>
       </div>
 
-      <div class="grid2">
+      <div class="grid2" id="formatRow">
         <label>Format
           <select id="preset">
             <option value="1024x1024">Carré 1:1 (1024×1024)</option>
@@ -103,6 +118,40 @@
   </div>
 </section>
 
+<!-- ============================== MODÈLES ============================== -->
+<section id="tab-models" class="tab">
+  <h2>Télécharger les modèles</h2>
+  <p class="hint">Chaque modèle s'installe en un clic, <b>génération et édition d'image comprises</b>.
+    Les fichiers arrivent dans <code>models/&lt;modèle&gt;/…</code> et deviennent utilisables immédiatement.</p>
+
+  <div id="modelsNotice" class="notice hidden"></div>
+
+  <div class="card">
+    <div class="card-title">1. Moteur (stable‑diffusion.cpp)</div>
+    <div id="engineInfo" class="small"></div>
+    <div class="row wrap">
+      <label>Variante <select id="flavor"></select></label>
+      <button id="btnEngine" class="primary">Installer / mettre à jour</button>
+    </div>
+    <p class="hint">Le binaire officiel précompilé est téléchargé depuis GitHub. NVIDIA → <b>cuda</b> (recommandé),
+      AMD/Intel/autres → <b>vulkan</b>. Vous pouvez aussi copier votre propre <code>sd-cli</code> dans le dossier <code>bin/</code>.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title">2. Modèles <span class="small" id="diskFree"></span></div>
+    <p class="hint">Choisissez la quantification puis cliquez sur <b>Tout télécharger</b> : les fichiers manquants
+      sont téléchargés à la suite, et le modèle devient actif. Tout fichier <code>.gguf</code>/<code>.safetensors</code>
+      copié manuellement dans <code>models/&lt;modèle&gt;/&lt;catégorie&gt;/</code> apparaît aussi automatiquement
+      (fine‑tunes, autres quantifications…), sélectionnable par bouton radio.</p>
+    <div id="modelSections"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Téléchargements en cours</div>
+    <div id="modelJobs"></div>
+  </div>
+</section>
+
 <!-- ============================== GALERIE ============================== -->
 <section id="tab-gallery" class="tab">
   <div class="row">
@@ -117,23 +166,7 @@
   <h2>Configuration</h2>
 
   <div class="card">
-    <div class="card-title">1. Moteur (stable‑diffusion.cpp)</div>
-    <div id="engineInfo" class="small"></div>
-    <div class="row wrap">
-      <label>Variante <select id="flavor"></select></label>
-      <button id="btnEngine" class="primary">Installer / mettre à jour</button>
-    </div>
-    <p class="hint">Le binaire officiel précompilé est téléchargé depuis GitHub. NVIDIA → <b>cuda</b> (recommandé), AMD/Intel/autres → <b>vulkan</b>. Vous pouvez aussi copier votre propre <code>sd-cli</code> dans le dossier <code>bin/</code>.</p>
-  </div>
-
-  <div class="card">
-    <div class="card-title">2. Modèles <span class="small" id="diskFree"></span></div>
-    <p class="hint">Pour chaque modèle, cliquez « Télécharger » sur les fichiers marqués <b>recommandé</b>. Tout fichier <code>.gguf</code>/<code>.safetensors</code> copié manuellement dans <code>models/&lt;modèle&gt;/&lt;catégorie&gt;/</code> apparaît automatiquement — y compris vos propres variantes (fine‑tunes, autres quantifications) du modèle de diffusion, sélectionnables par le bouton radio.</p>
-    <div id="modelSections"></div>
-  </div>
-
-  <div class="card">
-    <div class="card-title">3. Performance</div>
+    <div class="card-title">Performance</div>
     <label class="check"><input type="checkbox" id="offload"> Décharger les poids en RAM (<code>--offload-to-cpu</code>) — recommandé si ≤ 16 Go de VRAM</label>
     <label class="check"><input type="checkbox" id="fa"> Flash attention (<code>--diffusion-fa</code>) — plus rapide et moins de VRAM sur CUDA</label>
     <label class="check"><input type="checkbox" id="vaetiling"> VAE tiling (<code>--vae-tiling</code>) — pour les grandes images si manque de mémoire</label>
@@ -143,9 +176,24 @@
   </div>
 
   <div class="card">
+    <div class="card-title">Fichiers utilisés par le modèle actif</div>
+    <div id="activeFiles" class="small"></div>
+    <p class="hint">Ces fichiers se choisissent dans l'onglet <a href="#" data-goto="models">Modèles</a> (bouton radio de chaque ligne).</p>
+  </div>
+
+  <div class="card">
     <div class="card-title">Téléchargements</div>
     <div id="jobs"></div>
-    <button id="btnClearJobs" class="ghost">Effacer les terminés</button>
+    <div class="row wrap">
+      <button id="btnClearJobs" class="ghost">Effacer les terminés</button>
+      <button id="btnCancelJobs" class="danger">■ Tout annuler</button>
+      <button id="btnOpenModels" class="ghost">📁 Dossier des modèles</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Dossiers</div>
+    <div id="paths" class="small"></div>
   </div>
 </section>
 </main>
