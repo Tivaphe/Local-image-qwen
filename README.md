@@ -11,14 +11,18 @@ Modèles pris en charge (sélectionnables dans un menu déroulant) :
 | [FLUX.2 klein 4B](https://huggingface.co/unsloth/FLUX.2-klein-4B-GGUF) | Très rapide, léger | 4 étapes, CFG 1 |
 | [FLUX.2 klein 9B](https://huggingface.co/unsloth/FLUX.2-klein-9B-GGUF) | Rapide, meilleure qualité que le 4B | 4 étapes, CFG 1 |
 
-Les trois font de la génération **et** de l'édition d'image (image(s) de référence + instruction).
+Les trois modèles font de la génération **et** de l'édition d'image (image(s) de référence + instruction).
 
-- Zéro dépendance lourde : pas de PyTorch, pas de CUDA toolkit à installer.
-- Le moteur (binaire précompilé) et les modèles se téléchargent **en un clic depuis l'interface**.
+- **100 % local** et zéro dépendance lourde : pas de PyTorch, pas de CUDA toolkit nécessaire.
+- **Téléchargement en 1 clic** :
+  - Directement depuis l'écran **Générer** : bouton « 📥 Télécharger le modèle complet » dès qu'un modèle non installé est sélectionné.
+  - Depuis l'onglet **Modèles & Configuration** : pack complet recommandé ou choix précis des quantifications et variantes.
+  - Téléchargement personnalisé : collez un lien Hugging Face ou une URL directe vers un fichier `.gguf` / `.safetensors`.
+- Suivi en temps réel avec barre de progression, vitesse (Mo/s), temps restant (ETA) et possibilité d'annuler les téléchargements.
+- Moteur `sd-cli` précompilé téléchargeable en 1 clic (détection auto CUDA / Vulkan / ROCm / CPU).
 - Texte → image et **édition d'image** (image(s) de référence + instruction).
-- Galerie avec seed, réglages, réutilisation en un clic.
-- Fonctionne sous **Windows / Linux / macOS**, GPU NVIDIA (CUDA), AMD (ROCm/Vulkan), Intel (Vulkan) ou CPU.
-- Tout fichier `.gguf` déposé dans `models/<modèle>/diffusion/` est utilisable : vous choisissez librement votre variante (fine‑tune, autre quantification, etc.) via un bouton radio.
+- Galerie avec seed, réglages et réutilisation en 1 clic.
+- Fonctionne sous **Windows / Linux / macOS**.
 
 ## Prérequis
 
@@ -33,12 +37,13 @@ Windows : double-cliquer sur  start.bat
 Linux/macOS :                 ./start.sh
 ```
 
-Le navigateur s'ouvre sur `http://127.0.0.1:7860`. Puis, dans l'onglet **Configuration** :
+Le navigateur s'ouvre sur `http://127.0.0.1:7860`.
 
-1. **Moteur** → « Installer » (la variante est détectée automatiquement : `cuda` pour NVIDIA, sinon `vulkan`).
-2. **Modèles** → déplier le modèle voulu et cliquer « Télécharger » sur les fichiers *recommandés*
-   (diffusion + encodeur de texte + VAE ; pour Qwen‑Image‑2.1 ajoutez le mmproj si vous voulez l'édition d'image).
-3. Revenir dans **Générer**, choisir le modèle dans le menu, écrire un prompt, cliquer **Générer**.
+1. **Installer le moteur** : dans l'onglet **Modèles & Configuration**, cliquez sur « Installer le moteur » (détection automatique NVIDIA CUDA / Vulkan).
+2. **Télécharger un modèle** :
+   - Soit depuis l'onglet **Générer** : choisissez un modèle dans le menu déroulant et cliquez sur **« 📥 Télécharger le modèle complet »**.
+   - Soit dans l'onglet **Modèles & Configuration** : cliquez sur « 📥 Télécharger le pack recommandé » du modèle souhaité.
+3. Écrivez un prompt dans l'onglet **Générer** et cliquez sur **✨ Générer**.
 
 ## Dossiers
 
@@ -56,9 +61,7 @@ models/<modèle>/lora/                 LoRA optionnels (syntaxe <lora:nom:0.8> d
 outputs/                              images générées + .json de métadonnées
 ```
 
-Vous pouvez copier manuellement des fichiers dans ces dossiers : ils sont détectés
-automatiquement et sélectionnables via un bouton radio dans **Configuration**.
-Une URL directe peut aussi être collée dans le champ prévu pour télécharger n'importe quel fichier.
+Tout fichier `.gguf` / `.safetensors` copié manuellement dans ces dossiers est détecté immédiatement et sélectionnable via un bouton radio dans l'interface.
 
 ## Réglages conseillés
 
@@ -83,9 +86,7 @@ python run.py --host 0.0.0.0 --port 7860
 
 ## Problèmes fréquents
 
-- **« Moteur non installé »** : onglet Configuration → Installer. Si GitHub est inaccessible, téléchargez manuellement une
-  [release](https://github.com/leejet/stable-diffusion.cpp/releases) et dézippez-la dans `bin/`
-  (sous Windows avec NVIDIA prenez `sd-…-win-cuda12-x64.zip` **et** `cudart-sd-bin-win-cu12-x64.zip`).
+- **« Moteur non installé »** : onglet Modèles & Configuration → Installer le moteur. Si GitHub est inaccessible, téléchargez manuellement une [release](https://github.com/leejet/stable-diffusion.cpp/releases) et dézippez-la dans `bin/`.
 - **Manque de mémoire (CUDA out of memory)** : activer *VAE tiling*, réduire la résolution, ou ajouter `--max-vram 14` dans *Arguments supplémentaires*.
 - **Très lent** : vérifier que la variante `cuda` (et non `cpu`/`vulkan`) est installée, et que *flash attention* est cochée.
 - **Édition d'image refusée** : téléchargez l'encodeur de vision (mmproj).

@@ -10,9 +10,9 @@
 <header>
   <div class="brand">🖼️ <b>Local Image Qwen</b> <span class="sub">Qwen‑Image‑2.1 · FLUX.2 klein · GGUF · 100 % local</span></div>
   <nav>
-    <button data-tab="generate" class="active">Générer</button>
-    <button data-tab="gallery">Galerie</button>
-    <button data-tab="setup">Configuration <span id="setupBadge" class="badge hidden">!</span></button>
+    <button data-tab="generate" class="active">🎨 Générer</button>
+    <button data-tab="gallery">📁 Galerie</button>
+    <button data-tab="setup">⚙️ Modèles & Configuration <span id="setupBadge" class="badge hidden">!</span></button>
   </nav>
 </header>
 
@@ -21,14 +21,18 @@
 <section id="tab-generate" class="tab active">
   <div class="cols">
     <div class="col-left">
-      <div id="notReady" class="notice hidden">
-        ⚠️ L'application n'est pas encore prête. Allez dans <a href="#" data-goto="setup">Configuration</a> pour installer le moteur et télécharger les modèles.
+      <div id="engineNotice" class="notice warn hidden">
+        <span>⚠️ Le moteur <b>stable-diffusion.cpp</b> n'est pas encore installé.</span>
+        <button id="btnQuickEngine" class="primary small-btn" style="margin-left:8px">⚙️ Installer le moteur</button>
       </div>
 
       <label>Modèle
         <select id="family"></select>
       </label>
       <p class="hint" id="familyDesc"></p>
+
+      <!-- Carte d'état / téléchargement direct du modèle sélectionné -->
+      <div id="modelStatusCard" class="model-status-box"></div>
 
       <label>Prompt (description de l'image)
         <textarea id="prompt" rows="5" placeholder="Ex : un chat roux tenant une pancarte « Bonjour », lumière douce, photo réaliste"></textarea>
@@ -106,46 +110,86 @@
 <!-- ============================== GALERIE ============================== -->
 <section id="tab-gallery" class="tab">
   <div class="row">
-    <h2>Galerie</h2>
+    <h2>Galerie d'images générées</h2>
     <button id="btnOpenOutputs" class="ghost">📁 Ouvrir le dossier</button>
   </div>
   <div id="gallery" class="gallery"></div>
 </section>
 
-<!-- ============================== CONFIGURATION ======================== -->
+<!-- ============================== CONFIGURATION & MODÈLES ============== -->
 <section id="tab-setup" class="tab">
-  <h2>Configuration</h2>
+  <div class="row">
+    <h2>Modèles & Configuration</h2>
+    <span class="small" id="diskFree"></span>
+  </div>
 
+  <!-- 1. Moteur -->
   <div class="card">
-    <div class="card-title">1. Moteur (stable‑diffusion.cpp)</div>
+    <div class="card-title">1. Moteur de calcul (stable‑diffusion.cpp)</div>
     <div id="engineInfo" class="small"></div>
-    <div class="row wrap">
-      <label>Variante <select id="flavor"></select></label>
-      <button id="btnEngine" class="primary">Installer / mettre à jour</button>
+    <div class="row wrap" style="margin-top:10px">
+      <label style="margin:0; min-width:200px">Variante : <select id="flavor"></select></label>
+      <button id="btnEngine" class="primary">⬇ Installer / mettre à jour le moteur</button>
     </div>
     <p class="hint">Le binaire officiel précompilé est téléchargé depuis GitHub. NVIDIA → <b>cuda</b> (recommandé), AMD/Intel/autres → <b>vulkan</b>. Vous pouvez aussi copier votre propre <code>sd-cli</code> dans le dossier <code>bin/</code>.</p>
   </div>
 
+  <!-- 2. Catalogue de modèles -->
   <div class="card">
-    <div class="card-title">2. Modèles <span class="small" id="diskFree"></span></div>
-    <p class="hint">Pour chaque modèle, cliquez « Télécharger » sur les fichiers marqués <b>recommandé</b>. Tout fichier <code>.gguf</code>/<code>.safetensors</code> copié manuellement dans <code>models/&lt;modèle&gt;/&lt;catégorie&gt;/</code> apparaît automatiquement — y compris vos propres variantes (fine‑tunes, autres quantifications) du modèle de diffusion, sélectionnables par le bouton radio.</p>
+    <div class="card-title">2. Modèles supportés & Téléchargement en 1 clic</div>
+    <p class="hint">Pour chaque modèle, cliquez sur <b>« 📥 Télécharger le pack recommandé »</b> pour obtenir tous les fichiers nécessaires en un clic, ou personnalisez les variantes et quantifications ci-dessous.</p>
     <div id="modelSections"></div>
   </div>
 
+  <!-- 3. Téléchargement personnalisé (URL / Hugging Face) -->
   <div class="card">
-    <div class="card-title">3. Performance</div>
+    <div class="card-title">3. Télécharger un modèle ou fichier personnalisé (Hugging Face / URL)</div>
+    <p class="hint">Collez l'URL directe d'un fichier <code>.gguf</code> ou <code>.safetensors</code> (ex : lien Hugging Face). Les liens <code>/blob/</code> sont automatiquement convertis en téléchargement direct.</p>
+    <div class="grid3">
+      <label>Modèle cible
+        <select id="customFam"></select>
+      </label>
+      <label>Catégorie
+        <select id="customCat">
+          <option value="diffusion">Modèle de diffusion (GGUF)</option>
+          <option value="text_encoder">Encodeur de texte (GGUF)</option>
+          <option value="vae">VAE (.safetensors / .gguf)</option>
+          <option value="vision">Encodeur vision mmproj (GGUF)</option>
+          <option value="lora">LoRA (.safetensors / .gguf)</option>
+        </select>
+      </label>
+      <label>Nom du fichier (optionnel)
+        <input type="text" id="customFilename" placeholder="Auto-détecté depuis l'URL">
+      </label>
+    </div>
+    <label>URL du fichier
+      <input type="text" id="customUrl" placeholder="https://huggingface.co/.../resolve/main/model.gguf">
+    </label>
+    <div class="actions" style="margin-top:8px">
+      <button id="btnCustomDownload" class="primary">📥 Lancer le téléchargement</button>
+    </div>
+  </div>
+
+  <!-- 4. Téléchargements en cours -->
+  <div class="card">
+    <div class="row">
+      <div class="card-title" style="margin:0">4. Téléchargements en cours & Historique</div>
+      <button id="btnClearJobs" class="ghost small-btn">Effacer les terminés</button>
+    </div>
+    <div id="jobs" style="margin-top:10px"></div>
+  </div>
+
+  <!-- 5. Performance -->
+  <div class="card">
+    <div class="card-title">5. Performances & Réglages sd‑cli</div>
     <label class="check"><input type="checkbox" id="offload"> Décharger les poids en RAM (<code>--offload-to-cpu</code>) — recommandé si ≤ 16 Go de VRAM</label>
     <label class="check"><input type="checkbox" id="fa"> Flash attention (<code>--diffusion-fa</code>) — plus rapide et moins de VRAM sur CUDA</label>
     <label class="check"><input type="checkbox" id="vaetiling"> VAE tiling (<code>--vae-tiling</code>) — pour les grandes images si manque de mémoire</label>
-    <label>Threads CPU (‑1 = auto) <input type="number" id="threads" value="-1" style="width:100px"></label>
-    <label>Arguments supplémentaires sd‑cli <input type="text" id="extra" placeholder="ex : --max-vram 14"></label>
-    <button id="btnSavePerf" class="primary">Enregistrer</button>
-  </div>
-
-  <div class="card">
-    <div class="card-title">Téléchargements</div>
-    <div id="jobs"></div>
-    <button id="btnClearJobs" class="ghost">Effacer les terminés</button>
+    <div class="grid2">
+      <label>Threads CPU (‑1 = auto) <input type="number" id="threads" value="-1"></label>
+      <label>Arguments supplémentaires sd‑cli <input type="text" id="extra" placeholder="ex : --max-vram 14"></label>
+    </div>
+    <button id="btnSavePerf" class="primary" style="margin-top:8px">Enregistrer les réglages</button>
   </div>
 </section>
 </main>

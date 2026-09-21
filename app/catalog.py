@@ -99,3 +99,22 @@ FAMILIES = {f["id"]: f for f in (QWEN_IMAGE_21, FLUX2_KLEIN_4B, FLUX2_KLEIN_9B)}
 DEFAULT_FAMILY = "qwen_image_2.1"
 CATEGORIES = ("diffusion", "text_encoder", "vae", "vision", "lora")
 MODEL_EXTENSIONS = (".gguf", ".safetensors")
+
+
+def recommended_pack(family: str) -> list[dict]:
+    fam = FAMILIES.get(family)
+    if not fam:
+        return []
+    items = []
+    for cat in ("diffusion", "text_encoder", "vae", "vision"):
+        if cat == "vision" and not fam.get("edit_requires_vision"):
+            continue
+        cat_items = fam.get(cat, [])
+        rec = next((x for x in cat_items if x.get("recommended")), None)
+        if rec:
+            items.append({"category": cat, **rec})
+    return items
+
+
+def recommended_size_gb(family: str) -> float:
+    return round(sum(item["size_gb"] for item in recommended_pack(family)), 2)

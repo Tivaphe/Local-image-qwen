@@ -7,11 +7,11 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import backend, config, downloads, generator
+from . import backend, catalog, config, downloads, generator
 from .catalog import CATEGORIES, DEFAULT_FAMILY, FAMILIES, MODEL_EXTENSIONS
 from .paths import MODELS_DIR, OUTPUTS_DIR, STATIC_DIR, UPLOADS_DIR, ensure_dirs, model_dir
 
@@ -41,35 +41,88 @@ def _list_models(family: str, category: str) -> list[dict]:
 def status():
     cfg = config.load()
     local = {fam: {c: _list_models(fam, c) for c in CATEGORIES} for fam in FAMILIES}
-    # auto-sélection : si le fichier configuré n'existe plus, prendre le premier disponible
+    
+    # Auto-sélection : si le fichier configuré n'existe plus ou est vide, prendre le premier disponible
     changed = False
     for fam in FAMILIES:
         for cat in ("diffusion", "text_encoder", "vae", "vision"):
             names = [m["name"] for m in local[fam][cat]]
-            if cfg["selections"][fam].get(cat) not in names:
+            current_sel = cfg["selections"][fam].get(cat)
+            if not current_sel or current_sel not in names:
                 cfg["selections"][fam][cat] = names[0] if names else ""
                 changed = True
     if changed:
         config.save(cfg)
+
     fam = cfg["family"]
     sel = cfg["selections"][fam]
-    ready = all(sel.get(k) for k in ("diffusion", "text_encoder", "vae"))
-    families_status = {
-        f: {"ready": all(cfg["selections"][f].get(k) for k in ("diffusion", "text_encoder", "vae")),
-            "edit_ready": (not FAMILIES[f]["edit_requires_vision"]) or bool(cfg["selections"][f].get("vision"))}
-        for f in FAMILIES
-    }
+    engine_bin = backend.find_binary()
+    all_jobs = downloads.list_jobs()
+
+    families_status = {}
+    for f in FAMILIES:
+        fam_def = FAMILIES[f]
+        rec_items = []
+        for cat in ("diffusion", "text_encoder", "vae", "vision"):
+            if cat == "vision" and not fam_def.get("edit_requires_vision"):
+                continue
+            items = fam_def.get(cat, [])
+            rec = next((x for x in items if x.get("recommended")), None)
+            if rec:
+                rec_items.append({"category": cat, **rec})
+        
+        rec_total_gb = round(sum(x["size_gb"] for x in rec_items), 2)
+        rec_installed = [
+            x for x in rec_items
+            if any(m["name"] == x["id"] for m in local[f][x["category"]])
+        ]
+        
+        running_fam_jobs = [
+            j for j in all_jobs
+            if j["status"] == "running" and (j.get("family") == f or f in j.get("label", ""))
+        ]
+        
+        has_diffusion = bool(cfg["selections"][f].get("diffusion"))
+        has_text_encoder = bool(cfg["selections"][f].get("text_encoder"))
+        has_vae = bool(cfg["selections"][f].get("vae"))
+        is_ready = has_diffusion and has_text_encoder and has_vae
+        edit_ready = (not fam_def.get("edit_requires_vision")) or bool(cfg["selections"][f].get("vision"))
+
+        total_done = sum(j["done"] for j in running_fam_jobs)
+        total_size = sum(j["total"] for j in running_fam_jobs)
+        dl_progress = (total_done / total_size) if total_size > 0 else 0.0
+
+        families_status[f] = {
+            "ready": is_ready,
+            "edit_ready": edit_ready,
+            "has_recommended": len(rec_installed) == len(rec_items) and len(rec_items) > 0,
+            "recommended_total_gb": rec_total_gb,
+            "recommended_installed_count": len(rec_installed),
+            "recommended_total_count": len(rec_items),
+            "is_downloading": len(running_fam_jobs) > 0,
+            "download_progress": round(dl_progress, 3),
+            "running_jobs": running_fam_jobs,
+            "missing": [
+                cat_name for cat_name, ok in [
+                    ("diffusion", has_diffusion),
+                    ("text_encoder", has_text_encoder),
+                    ("vae", has_vae),
+                    ("vision (édition)", edit_ready or not fam_def.get("edit_requires_vision")),
+                ] if not ok
+            ]
+        }
+
     return {
         "engine": backend.installed_info(),
         "models": local,
         "families": [{k: v for k, v in FAMILIES[f].items()} for f in FAMILIES],
         "families_status": families_status,
         "config": cfg,
-        "ready": ready and backend.find_binary() is not None,
+        "ready": families_status[fam]["ready"] and engine_bin is not None,
         "edit_ready": families_status[fam]["edit_ready"],
         "samplers": generator.SAMPLERS,
         "disk_free_gb": round(shutil.disk_usage(str(MODELS_DIR)).free / 1e9, 1),
-        "jobs": downloads.list_jobs(),
+        "jobs": all_jobs,
         "generation": generator.state(),
     }
 
@@ -96,7 +149,7 @@ class ConfigIn(BaseModel):
 def set_config(c: ConfigIn):
     data = {k: v for k, v in c.model_dump().items() if v is not None}
     if "family" in data and data["family"] not in FAMILIES:
-        raise HTTPException(400, "famille inconnue")
+        raise HTTPException(400, "Famille inconnue")
     config.save(data)
     return {"ok": True, "config": config.load()}
 
@@ -118,6 +171,22 @@ def download(d: DownloadIn):
     return {"job": jid}
 
 
+class DownloadFamilyIn(BaseModel):
+    family: str
+    include_vision: bool = True
+
+
+@app.post("/api/download-family")
+def download_family(d: DownloadFamilyIn):
+    if d.family not in FAMILIES:
+        raise HTTPException(400, f"Famille inconnue : {d.family}")
+    try:
+        jids = downloads.start_family_download(d.family, include_vision=d.include_vision)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"jobs": jids, "count": len(jids)}
+
+
 class EngineIn(BaseModel):
     flavor: Optional[str] = None
 
@@ -130,6 +199,14 @@ def engine_install(e: EngineIn):
 @app.get("/api/jobs")
 def jobs():
     return downloads.list_jobs()
+
+
+@app.post("/api/jobs/{jid}/cancel")
+def cancel_job(jid: str):
+    ok = downloads.cancel_job(jid)
+    if not ok:
+        raise HTTPException(404, "Tâche introuvable ou déjà terminée")
+    return {"ok": True}
 
 
 @app.post("/api/jobs/clear")
