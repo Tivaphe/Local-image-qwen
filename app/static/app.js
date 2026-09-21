@@ -38,8 +38,11 @@ document.addEventListener("click", (e) => {
 });
 
 // ------------------------------------------------------------- status
-async function refreshStatus() {
-  STATUS = await api("/api/status");
+const SERVER_HINT = "Le serveur Local Image Qwen n'est pas joignable : lancez « ./start.sh » (ou « start.bat ») " +
+  "puis ouvrez http://127.0.0.1:7860. Cette page ouverte directement depuis le disque ne peut pas télécharger.";
+
+function applyStatus(s) {
+  STATUS = s;
   const c = STATUS.config;
   $("#notReady").classList.toggle("hidden", STATUS.ready);
   $("#setupBadge").classList.toggle("hidden", STATUS.ready);
@@ -78,6 +81,30 @@ async function refreshStatus() {
   renderModels();
   renderJobs();
   renderGeneration(STATUS.generation);
+}
+
+async function refreshStatus() {
+  let s;
+  try {
+    s = await api("/api/status");
+  } catch (e) {
+    showServerDown(e.message);
+    if (!STATUS && BOOT) applyStatus(BOOT);   // le catalogue embarqué dans la page prend le relais
+    return;
+  }
+  hideServerDown();
+  applyStatus(s);
+}
+
+function showServerDown(msg) {
+  const box = $("#serverDown");
+  if (!box) return;
+  box.classList.remove("hidden");
+  box.textContent = `⚠️ ${SERVER_HINT}${msg ? ` (détail : ${msg})` : ""}`;
+}
+function hideServerDown() {
+  const box = $("#serverDown");
+  if (box) box.classList.add("hidden");
 }
 
 function renderEngine() {
@@ -120,6 +147,7 @@ function renderBundles() {
 
     const card = document.createElement("div");
     card.className = "bundle" + (st.ready ? " ready" : "");
+    card.dataset.fam = fam.id;
     card.innerHTML = `
       <div class="bhead"><h4>${fam.name}</h4>
         <span class="st ${st.ready ? "ok" : "ko"}">${st.ready ? "✔ installé" : `${b.missing.length}/${b.files.length} à télécharger`}</span></div>
@@ -132,10 +160,6 @@ function renderBundles() {
         Inclure l'édition d'image (encodeur de vision)</label>` : ""}
       <div class="bfiles">${b.files.map((f) => `<div><span>${CAT_SHORT[f.category]} — ${f.id}</span>
         <span class="${f.present ? "have" : ""}">${f.present ? "✔ présent" : `${f.size_gb} Go`}</span></div>`).join("")}</div>`;
-
-    card.querySelector(".tierSel").onchange = (e) => { TIER_CHOICE[fam.id] = e.target.value; renderBundles(); };
-    const vis = card.querySelector(".visSel");
-    if (vis) vis.onchange = (e) => { VISION_CHOICE[fam.id] = e.target.checked; renderBundles(); };
 
     if (job) {
       const pct = job.total ? (100 * job.done) / job.total : 0;
@@ -150,30 +174,33 @@ function renderBundles() {
     } else {
       const btn = document.createElement("button");
       btn.className = "primary";
+      btn.dataset.dl = fam.id;
       btn.textContent = !b.missing.length ? "⬇ Tout est présent — relancer / autre qualité"
         : st.ready ? `⬇ Ajouter cette qualité (${b.missing_gb} Go)`
         : `⬇ Télécharger ${fam.name} (${b.missing_gb} Go)`;
-      btn.onclick = () => downloadBundle(fam.id);
       card.appendChild(btn);
     }
     if (st.ready && !active) {
       const use = document.createElement("button");
       use.className = "ghost";
       use.style.marginTop = "6px";
+      use.dataset.use = fam.id;
       use.textContent = "✔ Utiliser ce modèle";
-      use.onclick = async () => {
-        await postJSON("/api/config", { family: fam.id });
-        const d = fam.defaults;
-        $("#steps").value = d.steps; $("#stepsVal").textContent = d.steps;
-        $("#cfg").value = d.cfg_scale; $("#cfgVal").textContent = Number(d.cfg_scale).toFixed(1);
-        $("#sampler").value = d.sampler;
-        await refreshStatus();
-        showTab("generate");
-      };
       card.appendChild(use);
     }
     root.appendChild(card);
   }
+}
+
+// choix de qualité / édition, et « utiliser ce modèle »
+async function useFamily(famId) {
+  await postJSON("/api/config", { family: famId });
+  const d = famById(famId).defaults;
+  $("#steps").value = d.steps; $("#stepsVal").textContent = d.steps;
+  $("#cfg").value = d.cfg_scale; $("#cfgVal").textContent = Number(d.cfg_scale).toFixed(1);
+  $("#sampler").value = d.sampler;
+  await refreshStatus();
+  showTab("generate");
 }
 
 function renderQuickDl() {
@@ -216,7 +243,7 @@ function renderModels() {
     quick.className = "mrow";
     quick.innerHTML = `<span class="name"><b>Modèle complet</b> — ${binfo.files.length} fichiers (${binfo.total_gb} Go)</span>
       <button class="primary" ${bjob ? "disabled" : ""}>${bjob ? "⏳ en cours" : "⬇ Télécharger le modèle"}</button>`;
-    quick.querySelector("button").onclick = () => downloadBundle(fam.id);
+    quick.querySelector("button").dataset.dl = fam.id;
     body.appendChild(quick);
 
     for (const cat of ["diffusion", "text_encoder", "vae", "vision", "lora"]) {
@@ -232,13 +259,9 @@ function renderModels() {
       for (const m of local) {
         const row = document.createElement("div");
         row.className = "mrow";
-        row.innerHTML = `${selectable ? `<input type="radio" name="sel-${fam.id}-${cat}" ${sel[cat] === m.name ? "checked" : ""}>` : ""}
+        row.innerHTML = `${selectable ? `<input type="radio" name="sel-${fam.id}-${cat}" data-sel="${fam.id}/${cat}/${m.name}" ${sel[cat] === m.name ? "checked" : ""}>` : ""}
           <span class="name">${m.name}</span><span class="small">${m.size_gb} Go</span>
-          <span class="tag ok">présent</span><button class="ghost" title="Supprimer">🗑</button>`;
-        if (selectable) row.querySelector("input").onchange = () => postJSON("/api/config", { selections: { [fam.id]: { [cat]: m.name } } }).then(refreshStatus);
-        row.querySelector("button").onclick = async () => {
-          if (confirm(`Supprimer ${m.name} ?`)) { await api(`/api/models/${fam.id}/${cat}/${encodeURIComponent(m.name)}`, { method: "DELETE" }); refreshStatus(); }
-        };
+          <span class="tag ok">présent</span><button class="ghost" data-del="${fam.id}/${cat}/${m.name}" title="Supprimer">🗑</button>`;
         sec.appendChild(row);
       }
       for (const item of catalog) {
@@ -247,22 +270,12 @@ function renderModels() {
         row.className = "mrow";
         const busy = runningJobs.has(`${fam.id}/${cat}/${item.id}`);
         row.innerHTML = `<span class="name">${item.label}</span>${item.recommended ? '<span class="tag rec">recommandé</span>' : ""}
-          <button class="${item.recommended ? "primary" : ""}" ${busy ? "disabled" : ""}>${busy ? "⏳ en cours" : "⬇ Télécharger"}</button>`;
-        row.querySelector("button").onclick = async () => {
-          try { await postJSON("/api/download", { family: fam.id, category: cat, file_id: item.id }); } catch (e) { alert(e.message); }
-          refreshStatus();
-        };
+          <button class="${item.recommended ? "primary" : ""}" data-file="${fam.id}/${cat}/${item.id}" ${busy ? "disabled" : ""}>${busy ? "⏳ en cours" : "⬇ Télécharger"}</button>`;
         sec.appendChild(row);
       }
       const custom = document.createElement("div");
       custom.className = "mrow";
-      custom.innerHTML = `<input type="text" placeholder="URL directe d'un fichier .gguf/.safetensors à télécharger dans ce dossier" style="margin:0"><button>⬇</button>`;
-      custom.querySelector("button").onclick = async () => {
-        const url = custom.querySelector("input").value.trim();
-        if (!url) return;
-        try { await postJSON("/api/download", { family: fam.id, category: cat, file_id: "", url }); } catch (e) { alert(e.message); }
-        refreshStatus();
-      };
+      custom.innerHTML = `<input type="text" placeholder="URL directe d'un fichier .gguf/.safetensors à télécharger dans ce dossier" style="margin:0"><button data-url="${fam.id}/${cat}">⬇</button>`;
       sec.appendChild(custom);
       body.appendChild(sec);
     }
@@ -422,6 +435,7 @@ $("#btnEngine").onclick = async () => {
   refreshStatus();
 };
 $("#btnQuickDl").onclick = async () => {
+  if (!STATUS) { alert(SERVER_HINT); return; }
   await downloadBundle(STATUS.config.family);
   showTab("setup");
 };
@@ -434,8 +448,72 @@ $("#btnSavePerf").onclick = async () => {
 };
 $("#btnClearJobs").onclick = () => api("/api/jobs/clear", { method: "POST" }).then(refreshStatus);
 
-// ------------------------------------------------------------- boucle
-refreshStatus().then(() => { if (STATUS.generation.running) pollGeneration(); });
+// ------------------------------------------------------------- actions (délégation)
+// Un seul point d'entrée : fonctionne aussi sur le HTML rendu par le serveur,
+// avant même que le JavaScript ait pu interroger l'API.
+async function safe(fn) {
+  try { await fn(); } catch (e) { alert(e.message || e); }
+}
+
+document.addEventListener("click", async (e) => {
+  if (!e.target || !e.target.closest) return;
+  const dl = e.target.closest("[data-dl]");
+  if (dl) { await safe(() => downloadBundle(dl.dataset.dl)); return; }
+  const use = e.target.closest("[data-use]");
+  if (use) { await safe(() => useFamily(use.dataset.use)); return; }
+  const f = e.target.closest("[data-file]");
+  if (f) {
+    const [family, category, file_id] = f.dataset.file.split("/");
+    await safe(async () => { await postJSON("/api/download", { family, category, file_id }); refreshStatus(); });
+    return;
+  }
+  const u = e.target.closest("[data-url]");
+  if (u) {
+    const [family, category] = u.dataset.url.split("/");
+    const url = u.parentElement.querySelector("input").value.trim();
+    if (!url) return;
+    await safe(async () => { await postJSON("/api/download", { family, category, file_id: "", url }); refreshStatus(); });
+    return;
+  }
+  const del = e.target.closest("[data-del]");
+  if (del) {
+    const [family, category, name] = del.dataset.del.split("/");
+    if (!confirm(`Supprimer ${name} ?`)) return;
+    await safe(async () => {
+      await api(`/api/models/${family}/${category}/${encodeURIComponent(name)}`, { method: "DELETE" });
+      refreshStatus();
+    });
+  }
+});
+
+document.addEventListener("change", (e) => {
+  if (!e.target || !e.target.closest) return;
+  const card = e.target.closest("[data-fam]");
+  if (card && e.target.classList.contains("tierSel")) {
+    TIER_CHOICE[card.dataset.fam] = e.target.value;
+    if (STATUS) renderBundles();
+    return;
+  }
+  if (card && e.target.classList.contains("visSel")) {
+    VISION_CHOICE[card.dataset.fam] = e.target.checked;
+    if (STATUS) renderBundles();
+    return;
+  }
+  const radio = e.target.closest("[data-sel]");
+  if (radio) {
+    const [family, category, name] = radio.dataset.sel.split("/");
+    safe(() => postJSON("/api/config", { selections: { [family]: { [category]: name } } }).then(refreshStatus));
+  }
+});
+
+// ------------------------------------------------------------- démarrage
+const BOOT = (() => {
+  try { return JSON.parse(document.getElementById("bootData").textContent); } catch { return null; }
+})();
+
+if (location.protocol === "file:") showServerDown("");
+if (BOOT && !STATUS) applyStatus(BOOT);   // la page est complète sans attendre l'API
+refreshStatus().then(() => { if (STATUS && STATUS.generation.running) pollGeneration(); });
 setInterval(() => {
   // rafraîchit status si téléchargements en cours ou onglet config affiché
   if (!STATUS) return;

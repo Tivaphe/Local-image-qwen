@@ -105,6 +105,11 @@ python run.py --host 0.0.0.0 --port 7860
 - **Très lent** : vérifier que la variante `cuda` (et non `cpu`/`vulkan`) est installée, et que *flash attention* est cochée.
 - **Édition d'image refusée** : téléchargez l'encodeur de vision (mmproj) — la case
   « Inclure l'édition d'image » de l'encadré de téléchargement le prévoit.
+- **La page s'affiche mais rien ne se télécharge** : un bandeau rouge en haut de page signifie que le
+  serveur n'est pas joignable. Relancez `./start.sh` (ou `start.bat`) et ouvrez
+  <http://127.0.0.1:7860> — n'ouvrez pas `app/static/index.html` directement depuis le disque.
+  Les modèles et leurs boutons sont de toute façon écrits dans le HTML par le serveur :
+  ils restent visibles même si le JavaScript est bloqué.
 - **Téléchargement interrompu / coupure réseau** : relancez simplement « ⬇ Télécharger » sur le même
   modèle : les fichiers déjà complets sont ignorés et le fichier en cours reprend là où il s'est arrêté.
 - Le journal complet de `sd-cli` est visible sous la barre de progression.

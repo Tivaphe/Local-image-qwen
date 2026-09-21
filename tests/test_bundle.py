@@ -205,3 +205,17 @@ def test_interface_propose_bien_le_telechargement(mirror):
     js = c.get("/static/app.js").text
     assert "renderBundles" in js
     assert "/api/download/bundle" in js
+
+
+def test_la_page_html_affiche_les_modeles_sans_javascript(mirror):
+    """Régression : les modèles et leurs boutons doivent être dans le HTML lui-même."""
+    from fastapi.testclient import TestClient
+
+    html = TestClient(server.app).get("/").text
+    for fid, fam in catalog.FAMILIES.items():
+        assert fam["name"] in html
+        assert f'data-dl="{fid}"' in html
+    assert html.count("data-file=") == 30          # un bouton par fichier du catalogue
+    assert html.count("⬇ Télécharger le modèle") == len(catalog.FAMILIES)
+    assert 'id="bootData"' in html                 # catalogue embarqué pour l'affichage immédiat
+    assert "no-store" in TestClient(server.app).get("/").headers["cache-control"]

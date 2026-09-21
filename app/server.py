@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import backend, config, downloads, generator
+from . import backend, config, downloads, generator, ui
 from .catalog import (
     CATEGORIES,
     DEFAULT_FAMILY,
@@ -33,7 +33,10 @@ app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    """La page est rendue côté serveur : modèles et boutons présents sans JavaScript."""
+    template = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    return HTMLResponse(ui.render_index(template, _status_payload()),
+                        headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
 
 
 # ------------------------------------------------------------------ status
@@ -48,6 +51,10 @@ def _list_models(family: str, category: str) -> list[dict]:
 
 @app.get("/api/status")
 def status():
+    return _status_payload()
+
+
+def _status_payload() -> dict:
     cfg = config.load()
     local = {fam: {c: _list_models(fam, c) for c in CATEGORIES} for fam in FAMILIES}
     # auto-sélection : si le fichier configuré n'existe plus, prendre le premier disponible

@@ -17,6 +17,7 @@
 </header>
 
 <main>
+<div id="serverDown" class="notice error hidden"></div>
 <!-- ============================== GÉNÉRER ============================== -->
 <section id="tab-generate" class="tab active">
   <div class="cols">
@@ -135,7 +136,7 @@
     <p class="hint">Un seul clic télécharge <b>tous</b> les fichiers du modèle : diffusion + encodeur de texte + VAE
       (+ encodeur de vision pour l'édition d'image). Le téléchargement reprend où il s'est arrêté :
       les fichiers déjà présents sont ignorés.</p>
-    <div id="bundleCards" class="bundles"></div>
+    <div id="bundleCards" class="bundles"><!--BUNDLE_CARDS--></div>
   </div>
 
   <div class="card">
@@ -144,7 +145,7 @@
       Tout fichier <code>.gguf</code>/<code>.safetensors</code> copié manuellement dans
       <code>models/&lt;modèle&gt;/&lt;catégorie&gt;/</code> apparaît automatiquement — y compris vos propres
       variantes (fine‑tunes, autres quantifications) du modèle de diffusion, sélectionnables par le bouton radio.</p>
-    <div id="modelSections"></div>
+    <div id="modelSections"><!--MODEL_SECTIONS--></div>
   </div>
 
   <div class="card">
@@ -166,6 +167,7 @@
 </main>
 
 <div id="lightbox" class="lightbox hidden"><img id="lightboxImg" alt=""><div id="lightboxCap"></div></div>
+<!--BOOT_DATA-->
 <script src="/static/app.js"></script>
 </body>
 </html>
