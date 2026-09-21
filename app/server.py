@@ -12,7 +12,17 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import backend, config, downloads, generator, mannequin, mannequin_mesh, pose
+from . import backend, config, downloads, generator, mannequin, pose
+
+# Le mannequin anatomique (maillage) est un module à part : si la copie du projet est
+# incomplète (fichier absent), l'application démarre quand même et l'explique.
+try:
+    from . import mannequin_mesh
+except ImportError as _erreur_mesh:                      # pragma: no cover
+    mannequin_mesh = None
+    _RAISON_MESH = str(_erreur_mesh)
+else:
+    _RAISON_MESH = ""
 from .catalog import (
     CATEGORIES,
     DEFAULT_FAMILY,
@@ -114,9 +124,7 @@ def status():
         "control": {
             "types": list(generator.CONTROL_TYPES),
             "mannequin": {"modes": list(mannequin.MODES), "default_size": [768, 1024]},
-            "mannequin_mesh": {"disponible": (mannequin_mesh.ASSETS / "maillage.npz").exists(),
-                               "morphologies": list(mannequin_mesh.MORPHOLOGIES),
-                               "poses": list(mannequin_mesh.POSES)},
+            "mannequin_mesh": _etat_mannequin_mesh(),
             "pose": pose.available(),
             "pose_models": pose_models(),
             "pose_model_present": bool(pose_detectors),
@@ -410,6 +418,30 @@ def mannequin_pose(m: MannequinIn):
 
 
 # ------------------------------------------------- mannequin anatomique (maillage)
+def _etat_mannequin_mesh() -> dict:
+    """Disponibilité du mannequin anatomique (module et assets présents ?)."""
+    if mannequin_mesh is None:
+        return {"disponible": False, "raison": _RAISON_MESH or "module absent",
+                "aide": "copie incomplète : il manque app/mannequin_mesh.py — récupérez la dernière version"}
+    if not (mannequin_mesh.ASSETS / "maillage.npz").exists():
+        return {"disponible": False, "raison": "assets absents",
+                "aide": "lancez : python tools/build_mannequin_assets.py /chemin/vers/makehuman/data"}
+    return {"disponible": True,
+            "morphologies": list(mannequin_mesh.MORPHOLOGIES),
+            "poses": list(mannequin_mesh.POSES)}
+
+
+def _mesh_disponible():
+    """Renvoie le module du mannequin anatomique ou explique pourquoi il est absent."""
+    if mannequin_mesh is None:
+        raise HTTPException(503,
+                            "le mannequin anatomique n'est pas installé dans cette copie du projet : "
+                            "il manque le fichier app/mannequin_mesh.py. "
+                            "Récupérez la dernière version du projet (le reste de l'application fonctionne).")
+    return mannequin_mesh
+
+
+
 class MannequinMeshIn(BaseModel):
     """Requête du mannequin anatomique : morphologie + angles d'articulation."""
     pose: dict = {}              # {articulation: [flexion, abduction, torsion]} en degrés
@@ -426,8 +458,12 @@ class MannequinMeshIn(BaseModel):
 @app.get("/api/mannequin/model")
 def mannequin_model():
     """Catalogue du mannequin anatomique : morphologies, poses, articulations et butées."""
+    etat = _etat_mannequin_mesh()
+    if not etat["disponible"]:
+        return {"ok": True, "disponible": False, "raison": etat["raison"], "aide": etat["aide"]}
     return {
         "ok": True,
+        "disponible": True,
         "morphologies": mannequin_mesh.MORPHOLOGIES,
         "poses": {nom: angles for nom, angles in mannequin_mesh.POSES.items()},
         "poses_origine": mannequin_mesh.POSES_ORIGINE,
@@ -445,22 +481,24 @@ def mannequin_model():
 @app.post("/api/mannequin/mesh/pose")
 def mannequin_mesh_pose(m: MannequinMeshIn):
     """Positions des 21 articulations pour une pose donnée (poignées de l'éditeur)."""
+    mesh = _mesh_disponible()
     try:
-        points = mannequin_mesh.articulations(m.pose or None, origine=m.origine or None)
-    except mannequin_mesh.MannequinError as e:
+        points = mesh.articulations(m.pose or None, origine=m.origine or None)
+    except mesh.MannequinError as e:
         raise HTTPException(400, str(e))
-    return {"ok": True, "articulations": points, "etiquettes": mannequin_mesh.ETIQUETTES,
-            "limites": mannequin_mesh.LIMITES}
+    return {"ok": True, "articulations": points, "etiquettes": mesh.ETIQUETTES,
+            "limites": mesh.LIMITES}
 
 
 @app.post("/api/mannequin/mesh/render")
 def mannequin_mesh_render(m: MannequinMeshIn):
     """Rend le mannequin anatomique (volumes, squelette OpenPose, profondeur, silhouette)."""
+    mesh = _mesh_disponible()
     donnees = m.model_dump()
     width, height = max(128, m.width // 32 * 32), max(128, m.height // 32 * 32)
     try:
-        img = mannequin_mesh.rend(donnees, m.mode, width, height)
-    except mannequin_mesh.MannequinError as e:
+        img = mesh.rend(donnees, m.mode, width, height)
+    except mesh.MannequinError as e:
         raise HTTPException(400, str(e))
     name = f"{uuid.uuid4().hex}-mannequin-{m.mode}.png"
     pose.save_image(img, CONTROLS_DIR / name)

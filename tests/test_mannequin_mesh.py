@@ -257,3 +257,59 @@ def test_api_status_annonce_le_mannequin_anatomique(client):
     bloc = d["control"]["mannequin_mesh"]
     assert bloc["disponible"] is True
     assert "femme" in bloc["morphologies"] and "marche" in bloc["poses"]
+
+
+# ------------------------------------------- copie du projet incomplète / dégradée
+def test_run_detecte_une_copie_incomplete(tmp_path):
+    """Le démarrage explique ce qui manque au lieu d'afficher une trace de pile."""
+    import run
+
+    assert run.verifie_copie(tmp_path) == 2                     # rien n'est présent → bloquant
+    assert set(run.fichiers_manquants(tmp_path)) == set(run.FICHIERS_REQUIS)
+
+    for chemin in run.FICHIERS_REQUIS:                          # copie complète → démarre
+        fichier = tmp_path / chemin
+        fichier.parent.mkdir(parents=True, exist_ok=True)
+        fichier.write_text("")
+    assert run.verifie_copie(tmp_path) == 0
+
+    # il ne manque que le mannequin anatomique : signalé, mais l'application démarre
+    assert run.fichiers_manquants(tmp_path, [c for c, _ in run.FICHIERS_CONSEILLES]) != []
+    assert run.verifie_copie(tmp_path) == 0
+
+
+def test_api_sans_le_mannequin_anatomique(client, monkeypatch):
+    """Copie incomplète : l'API répond clairement au lieu de casser le serveur."""
+    from app import server
+
+    monkeypatch.setattr(server, "mannequin_mesh", None)
+    d = client.get("/api/mannequin/model").json()
+    assert d["ok"] is True and d["disponible"] is False
+    assert "mannequin_mesh" in d["aide"]
+
+    r = client.post("/api/mannequin/mesh/render", json={"morphology": "femme"})
+    assert r.status_code == 503 and "mannequin_mesh.py" in r.json()["detail"]
+    r = client.post("/api/mannequin/mesh/pose", json={})
+    assert r.status_code == 503
+
+    etat = client.get("/api/status").json()["control"]["mannequin_mesh"]
+    assert etat["disponible"] is False and etat["aide"]
+
+
+def test_api_sans_les_assets_du_mannequin(client, monkeypatch, tmp_path):
+    """Assets absents : message d'action (comment les reconstruire) plutôt qu'une erreur serveur."""
+    d = client.get("/api/status").json()["control"]["mannequin_mesh"]
+    assert d["disponible"] is True
+
+    monkeypatch.setattr(MM, "ASSETS", tmp_path / "vide")
+    MM._CACHE.clear()                       # sinon les assets déjà chargés restent en mémoire
+    etat = client.get("/api/status").json()["control"]["mannequin_mesh"]
+    assert etat["disponible"] is False and "assets" in etat["raison"]
+
+    modele = client.get("/api/mannequin/model").json()
+    assert modele["disponible"] is False and "build_mannequin_assets" in modele["aide"]
+
+    r = client.post("/api/mannequin/mesh/render", json={"morphology": "femme"})
+    assert r.status_code == 400 and "assets du mannequin absents" in r.json()["detail"]
+    monkeypatch.undo()
+    MM._CACHE.clear()                       # les tests suivants rechargent les vrais assets
