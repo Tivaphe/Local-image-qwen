@@ -52,7 +52,8 @@ def _plier_bras(pose: dict, cote: str, cible, pole=None) -> dict:
     pose[f"elbow_{cote}"] = coude
     pose[f"wrist_{cote}"] = poignet
     pose[f"hand_{cote}"] = [poignet[i] + axe[i] / n * lengths[f"hand_{cote}"] for i in range(3)]
-    return pose
+    # même filtre que le navigateur : les butées anatomiques s'appliquent à la pose envoyée
+    return mannequin.clamp_pose(pose, lengths)
 
 
 def _lengths_of(pose: dict) -> dict:

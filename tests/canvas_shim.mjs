@@ -264,11 +264,12 @@ export class Canvas2DShim {
       this._fillPath({ points: quad.map(([x, y]) => unapply(this._m, x, y)), closed: true }, style);
       if (this.lineCap === "round") {
         for (const [cx, cy] of [[x0, y0], [x1, y1]]) {
-          for (let a = 0; a < TAU; a += 0.35) {
+          const disque = [];                    // calotte pleine (sinon effet « éventail »)
+          for (let a = 0; a < TAU; a += TAU / 16) {
             const px = cx + Math.cos(a) * half, py = cy + Math.sin(a) * half;
-            const q = unapply(this._m, px, py);
-            this._fillPath({ points: [q, [q[0] + 0.4, q[1]], [q[0], q[1] + 0.4]], closed: true }, style);
+            disque.push(unapply(this._m, px, py));
           }
+          this._fillPath({ points: disque, closed: true }, style);
         }
       }
     }

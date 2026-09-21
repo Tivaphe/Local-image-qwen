@@ -83,6 +83,270 @@ BUILD_ORDER = ["hips", "spine", "chest", "neck", "head", "head_top",
                "hip_l", "knee_l", "ankle_l", "toe_l", "heel_l",
                "hip_r", "knee_r", "ankle_r", "toe_r", "heel_r"]
 
+# ------------------------------------------------------- butées articulaires
+# « cone » : écart maximal de l'os par rapport à sa direction de repos (degrés).
+# « pli »  : flexion autorisée par rapport au segment parent (sens unique : pas
+#            d'hyperextension pour un coude ou un genou).
+LIMITS = {
+    "neck": {"cone": 45, "pli": (-40, 45)}, "head": {"cone": 38, "pli": (-35, 40)},
+    "head_top": {"cone": 18},
+    "shoulder_l": {"cone": 28},
+    "elbow_l": {"cone": 170},                         # épaule : cône, l'anti-collision suffit
+    "wrist_l": {"cone": 180, "pli": (0, 150)},        # coude : flexion seulement
+    "hand_l": {"cone": 100, "pli": (0, 85)},          # poignet
+    "hip_l": {"cone": 30},
+    "knee_l": {"cone": 160, "pli": (-25, 115)},       # hanche : extension limitée
+    "ankle_l": {"cone": 170, "pli": (0, 145)},        # genou : flexion seulement
+    "toe_l": {"cone": 110, "pli": (-75, 40)},         # cheville
+    "heel_l": {"cone": 110},                          # talon : solidaire du pied
+}
+for _cote in ("l", "r"):
+    for _base in ("shoulder", "elbow", "wrist", "hand", "hip", "knee", "ankle", "toe", "heel"):
+        _lim = LIMITS.get(_base + "_l")
+        if _lim:
+            LIMITS[_base + "_" + _cote] = _lim
+
+
+# Articulations qui ne doivent jamais entrer dans le volume du tronc (coude dans le cou…).
+MEMBRES_TESTES = ("elbow_l", "wrist_l", "hand_l", "elbow_r", "wrist_r", "hand_r")
+
+# Marge acceptée sur les butées : l'IK du navigateur place les articulations au degré près.
+TOLERANCE_BUTEE = 5.0
+
+# Tendons/élastiques : (articulation, os parent, os enfant, axe de pliage préféré).
+TENDONS = []
+for _cote in ("l", "r"):
+    TENDONS.append(("shoulder_" + _cote, "shoulder_" + _cote, "elbow_" + _cote, (-1, 0, 0)))
+    TENDONS.append(("elbow_" + _cote, "elbow_" + _cote, "wrist_" + _cote, (1, 0, 0)))
+    TENDONS.append(("hip_" + _cote, "hip_" + _cote, "knee_" + _cote, (1, 0, 0)))
+    TENDONS.append(("knee_" + _cote, "knee_" + _cote, "ankle_" + _cote, (-1, 0, 0)))
+
+
+def _composantes(v):
+    """Un point de pose accepte un tuple, une liste ou un objet {x, y, z}."""
+    if isinstance(v, dict):
+        return (float(v["x"]), float(v["y"]), float(v["z"]))
+    return (float(v[0]), float(v[1]), float(v[2]))
+
+
+def rest_bend(nom: str) -> float:
+    """Pli de repos (degrés) entre un os et son parent, dans la pose debout."""
+    parent = PARENT.get(nom)
+    d, dp = REST_DIRS.get(nom), (REST_DIRS.get(parent) if parent else None)
+    if not d or not dp:
+        return 0.0
+    nd, ndp = _norm(tuple(d)), _norm(tuple(dp))
+    return math.degrees(math.acos(max(-1.0, min(1.0, sum(x * y for x, y in zip(nd, ndp))))))
+
+
+def _soustraction(a, b):
+    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+
+def _somme(a, b):
+    return (a[0] + b[0], a[1] + b[1], a[2] + b[2])
+
+
+def _produit(a, k):
+    return (a[0] * k, a[1] * k, a[2] * k)
+
+
+def _angle(a, b):
+    na, nb = _norm(a), _norm(b)
+    return math.degrees(math.acos(max(-1.0, min(1.0, sum(x * y for x, y in zip(na, nb))))))
+
+
+def _interp(a, b, t):
+    return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t)
+
+
+def _coord(pose, nom):
+    p = pose.get(nom)
+    if p is None:
+        return None
+    return _composantes(p)
+
+
+def _croix(a, b):
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+
+def _rotation(vector, axe, angle):
+    """Rotation d'un vecteur autour d'un axe (formule de Rodrigues)."""
+    c, sn = math.cos(angle), math.sin(angle)
+    k = _norm(axe)
+    kxv = _croix(k, vector)
+    kv = sum(x * y for x, y in zip(k, vector))
+    return tuple(vector[i] * c + kxv[i] * sn + k[i] * kv * (1 - c) for i in range(3))
+
+
+def _ecrire(pose: dict, nom: str, point) -> None:
+    """Réécrit un point de pose en conservant son type (liste, tuple ou objet)."""
+    actuel = pose.get(nom)
+    if isinstance(actuel, dict):
+        actuel["x"], actuel["y"], actuel["z"] = point[0], point[1], point[2]
+    elif isinstance(actuel, list):
+        pose[nom] = [point[0], point[1], point[2]]
+    else:
+        pose[nom] = tuple(point)
+
+
+def clamp_pose(pose: dict, lengths: dict | None = None) -> dict:
+    """Ramène chaque os dans ses butées (cône autour du repos + charnière du parent).
+
+    Même règle que le moteur du navigateur : une pose bricolée hors butées est
+    redressée au lieu d'être refusée, comme lorsque l'utilisateur tire un membre.
+    """
+    lengths = lengths or bone_lengths({})
+    for nom in BUILD_ORDER:
+        parent = PARENT.get(nom)
+        if not parent:
+            continue
+        lim = LIMITS.get(nom)
+        p, q = _coord(pose, parent), _coord(pose, nom)
+        if not lim or p is None or q is None:
+            continue
+        long = lengths.get(nom) or math.dist(p, q)
+        if long <= 0:
+            continue
+        grand = PARENT.get(parent)
+        r = _coord(pose, grand) if grand else None
+        dir_parent = _norm(_soustraction(p, r)) if r else (0.0, 1.0, 0.0)
+        out = _norm(_soustraction(q, p))
+        if sum(v * v for v in out) < 1e-12:
+            continue
+        if "pli" in lim:
+            pli = _angle(out, dir_parent) - rest_bend(nom)
+            mini, maxi = lim["pli"]
+            cible = max(float(mini), min(float(maxi), pli))
+            if abs(cible - pli) > 1e-6:
+                out = _rotation(out, _norm(_croix(out, dir_parent)), math.radians(pli - cible))
+        dir_repos = REST_DIRS.get(nom)
+        if "cone" in lim and dir_repos:
+            repos = _norm(tuple(dir_repos))
+            ecart = _angle(out, repos)
+            if ecart > lim["cone"]:
+                out = _rotation(out, _norm(_croix(out, repos)), math.radians(ecart - lim["cone"]))
+        _ecrire(pose, nom, _somme(p, _produit(_norm(out), long)))
+    return pose
+
+
+def _buts_violees(pose: dict) -> list[tuple[str, float, float]]:
+    """Articulations hors butées : (nom, angle mesuré, maximum autorisé), en degrés."""
+    fautes = []
+    for nom in BUILD_ORDER:
+        parent = PARENT.get(nom)
+        if not parent:
+            continue
+        lim = LIMITS.get(nom)
+        if not lim:
+            continue
+        p, q = _coord(pose, nom), _coord(pose, parent)
+        if p is None or q is None:
+            continue
+        dir_os = _norm(_soustraction(p, q))
+        grand = PARENT.get(parent)
+        r = _coord(pose, grand) if grand else None
+        dir_parent = _norm(_soustraction(q, r)) if r else (0.0, 1.0, 0.0)
+        pli = _angle(dir_os, dir_parent) - rest_bend(nom)
+        # tolérance : l'IK du navigateur place le coude/genou au degré près.
+        # Sans « pli » déclaré (épaule, hanche…), seule la position de repos compte.
+        if "pli" in lim:
+            mini, maxi = lim["pli"]
+            if pli > maxi + TOLERANCE_BUTEE:
+                fautes.append((nom, pli, maxi))
+            elif pli < mini - TOLERANCE_BUTEE:
+                fautes.append((nom, pli, mini))
+        dir_repos = REST_DIRS.get(nom)
+        if "cone" in lim and dir_repos:
+            ecart = _angle(dir_os, _norm(dir_repos))
+            if ecart > lim["cone"] + TOLERANCE_BUTEE:
+                fautes.append((nom, ecart, float(lim["cone"])))
+    return fautes
+
+
+def _collisions(pose: dict, lengths: dict, thickness: dict) -> list[str]:
+    """Articulations du bras entrées dans le volume du tronc (le mannequin se traverse)."""
+    haut, cou = pose.get("hips"), pose.get("neck")
+    if haut is None or cou is None:
+        return []
+    haut, cou = _composantes(haut), _composantes(cou)
+    ecart = max(1e-3, cou[1] - haut[1])
+    fautes = []
+    for nom in MEMBRES_TESTES:
+        p = _coord(pose, nom)
+        if p is None or p[1] > cou[1] + 0.02:
+            continue
+        f = max(0.0, min(1.0, (p[1] - haut[1]) / ecart))
+        if f <= 0.03:
+            continue
+        largeur, profondeur = _torso_size(f, thickness, pose)
+        centre = _torso_frame(pose, lengths, f)["centre"]
+        dx = (p[0] - centre[0]) / max(1e-3, largeur / 2)
+        dz = (p[2] - centre[2]) / max(1e-3, profondeur / 2)
+        if dx * dx + dz * dz < 0.98:
+            fautes.append(nom)
+    return fautes
+
+
+def _tendon_points(pose: dict, lengths: dict, thickness: dict, tend: tuple) -> dict | None:
+    """Géométrie d'un tendon : attaches de part et d'autre, du côté extérieur au pli."""
+    joint, parent_os, enfant, axe_prefere = tend
+    grand = PARENT.get(parent_os)
+    a = _coord(pose, grand) if grand else None
+    if a is None:
+        a = _coord(pose, parent_os)
+    j, b = _coord(pose, joint), _coord(pose, enfant)
+    if a is None or j is None or b is None:
+        return None
+    da, db = _norm(_soustraction(j, a)), _norm(_soustraction(b, j))
+    if _norm(da) == (0.0, 0.0, 0.0) or _norm(db) == (0.0, 0.0, 0.0):
+        return None
+    maxi = float(LIMITS.get(enfant, {}).get("pli", (0, 120))[1] or 120)
+    pli = abs(_angle(da, db) - rest_bend(enfant))
+    tension = max(0.0, min(1.0, pli / max(1.0, maxi)))
+    rayon = max(0.02, _mean_radius(enfant, thickness) * profile_at(enfant, 0.06))
+    dehors = _norm(_soustraction(da, db))
+    if _norm(dehors) == (0.0, 0.0, 0.0):
+        dehors = _norm((axe_prefere[1] * da[2] - axe_prefere[2] * da[1],
+                        axe_prefere[2] * da[0] - axe_prefere[0] * da[2],
+                        axe_prefere[0] * da[1] - axe_prefere[1] * da[0]))
+    if _norm(dehors) == (0.0, 0.0, 0.0):
+        dehors = (0.0, 0.0, -1.0)
+    pA = _somme(_interp(a, j, 0.86), _produit(dehors, rayon * 0.34))
+    pB = _somme(_interp(j, b, 0.18), _produit(dehors, rayon * 0.34))
+    ctrl = _somme(_interp(pA, pB, 0.5), _produit(dehors, rayon * (0.06 + tension * 0.55)))
+    return {"A": pA, "B": pB, "centre": ctrl, "tension": tension, "rayon": rayon}
+
+
+def _draw_tendon(canvas, item: dict, camera, mode: str) -> None:
+    """Trace un tendon : ombre douce puis cordon clair, tension selon le pli."""
+    import cv2
+    import numpy as np
+
+    if mode != "volume":
+        return
+    hauteur, largeur = canvas.shape[:2]
+    A = project(item["A"], camera, largeur, hauteur)
+    B = project(item["B"], camera, largeur, hauteur)
+    C = project(item["centre"], camera, largeur, hauteur)
+    pts = []
+    for i in range(13):
+        t = i / 12
+        x = (1 - t) ** 2 * A["x"] + 2 * (1 - t) * t * C["x"] + t * t * B["x"]
+        y = (1 - t) ** 2 * A["y"] + 2 * (1 - t) * t * C["y"] + t * t * B["y"]
+        pts.append([int(round(x)), int(round(y))])
+    trace = np.array(pts, dtype="int32")
+    echelle = (A["scale"] + B["scale"]) / 2
+    ep = max(1, int(round(0.0095 * echelle)))
+    for couleur, epaisseur, alpha in (((38, 50, 90), max(1, int(round(ep * 1.6))), 0.06 + 0.14 * item["tension"]),
+                                      ((205, 221, 242), max(1, int(round(ep * 0.9))), 0.14 + 0.44 * item["tension"])):
+        couche = np.zeros_like(canvas)
+        cv2.polylines(couche, [trace], False, couleur, epaisseur, cv2.LINE_AA)
+        m = couche.any(axis=2)
+        canvas[m] = (canvas[m] * (1 - alpha) + couche[m] * alpha).astype("uint8")
+
+
 # Longueurs de référence de chaque segment (mètres) — valeurs du tableau de l'interface.
 BASE_LENGTHS = {
     "spine": 0.16, "chest": 0.20, "neck": 0.115, "head": 0.13, "head_top": 0.10,
@@ -105,6 +369,7 @@ MORPHOLOGIES = {
     "athletique": {"stature": 1.01, "shoulders": 1.12, "legs": 1.0, "arms": 1.0, "girth": 1.16},
     "fort": {"stature": 1, "shoulders": 1.18, "legs": 0.97, "arms": 0.99, "girth": 1.34},
     "femme": {"stature": 0.97, "shoulders": 0.88, "legs": 1.02, "arms": 0.96, "girth": 0.92},
+    "homme": {"stature": 1.03, "shoulders": 1.10, "legs": 1.0, "arms": 1.03, "girth": 1.12},
 }
 BUILDS = MORPHOLOGIES                     # ancien nom conservé
 
@@ -433,6 +698,17 @@ def validate(payload: dict) -> tuple[dict, dict, dict]:
                 "Os hors gabarit : " + ", ".join(deformes[:6])
                 + (f" (+{len(deformes) - 6})" if len(deformes) > 6 else "")
                 + ". Déplacez les articulations depuis l'application (le coude et le genou se plient par IK).")
+        buts = _buts_violees(pose)
+        if buts:
+            nom, mesure, maximum = buts[0]
+            raise MannequinError(
+                f"pose hors butées : « {nom} » à {mesure:.0f}° (maximum {maximum:.0f}°). "
+                "Les articulations du mannequin s'arrêtent avant l'hyperextension.")
+        travers = _collisions(pose, build["lengths"], build["thickness"])
+        if travers:
+            raise MannequinError(
+                "pose impossible : le mannequin se traverse (« " + " », « ".join(travers[:3])
+                + " » entre dans le tronc). Éloignez le bras du corps pour que le membre butte sur la peau.")
     camera = dict(payload.get("camera") or {})
     camera.setdefault("yaw", 0.42)
     camera.setdefault("pitch", 0.12)
@@ -1014,6 +1290,12 @@ def render(payload: dict, mode: str = "volume", width: int = 768, height: int = 
             _draw_limb(canvas, it["a"], it["b"], it["profil"], it["mean_r"], it["a3"], it["b3"],
                        camera, mode, gris(it["depth"]))
 
+    if mode == "volume":
+        for tend in TENDONS:
+            item = _tendon_points(pose, lengths, thickness, tend)
+            if item:
+                _draw_tendon(canvas, item, camera, mode)
+
     if mode == "volume" and payload.get("anatomy") is not False:
         for cue in CUES_TRONC:
             p3 = _surface_tronc(pose, lengths, thickness, cue["f"], cue["phi"])
@@ -1022,19 +1304,24 @@ def render(payload: dict, mode: str = "volume", width: int = 768, height: int = 
         fr_tete = _head_rings(pose, thickness)[1]
         lg = fr_tete["largeur"]
         surface_tete = lambda u, phi: _head_surface(fr_tete, u, phi)     # noqa: E731
-        for cote in (1, -1):                       # yeux et orbites
+        for cote in (1, -1):                       # sourcils, yeux, orbites
+            _tache(canvas, surface_tete(0.67, math.pi / 2 + cote * 0.42), lg * 0.105, lg * 0.022,
+                   (43, 26, 20), 0.22, camera)
             _tache(canvas, surface_tete(0.60, math.pi / 2 + cote * 0.42), lg * 0.10, lg * 0.052,
                    (41, 50, 74), 0.50, camera)
             _tache(canvas, surface_tete(0.65, math.pi / 2 + cote * 0.42), lg * 0.13, lg * 0.040,
-                   (20, 26, 43), 0.12, camera)
-        _tache(canvas, surface_tete(0.55, math.pi / 2), lg * 0.075, lg * 0.115,      # arete du nez
+                   (20, 26, 43), 0.08, camera)
+        _tache(canvas, surface_tete(0.58, math.pi / 2), lg * 0.028, lg * 0.075,       # arete du nez
                (232, 242, 255), 0.30, camera)
-        _tache(canvas, surface_tete(0.62, math.pi / 2), lg * 0.02, lg * 0.02,         # bout du nez
-               (143, 164, 201), 0.25, camera)
+        _tache(canvas, surface_tete(0.55, math.pi / 2 + 0.24), lg * 0.045, lg * 0.07,  # flanc ombre
+               (74, 44, 34), 0.16, camera)
+        for cote in (1, -1):                                                          # narines
+            _tache(canvas, surface_tete(0.475, math.pi / 2 + cote * 0.10), lg * 0.016, lg * 0.012,
+                   (68, 42, 44), 0.34, camera)
         _tache(canvas, surface_tete(0.34, math.pi / 2), lg * 0.13, lg * 0.035,        # bouche
                (52, 63, 109), 0.42, camera)
-        _tache(canvas, surface_tete(0.20, math.pi / 2), lg * 0.10, lg * 0.05,         # menton
-               (216, 231, 255), 0.18, camera)
+        _tache(canvas, surface_tete(0.20, math.pi / 2), lg * 0.065, lg * 0.032,       # menton
+               (216, 231, 255), 0.12, camera)
         for cote in (1, -1):                       # oreilles
             _tache(canvas, surface_tete(0.55, cote * 0.02), lg * 0.045, lg * 0.085,
                    (143, 169, 211), 0.85, camera)

@@ -111,6 +111,11 @@
   const clone = (p) => v(p.x, p.y, p.z);
   const lerp = (a, b, t) => v(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
 
+  const cross = (a, b) => v(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
+  const angleEntre = (a, b) => Math.acos(Math.max(-1, Math.min(1, dot(norm(a), norm(b)))));
+  const rad = (degres) => (degres * Math.PI) / 180;
+  const deg = (r) => (r * 180) / Math.PI;
+
   /** Rotation d'un vecteur autour d'un axe (formule de Rodrigues). */
   function rotateAround(vector, axis, angle) {
     const c = Math.cos(angle), sn = Math.sin(angle);
@@ -214,6 +219,7 @@
     athletique: { stature: 1.01, shoulders: 1.12, legs: 1.0, arms: 1.0, girth: 1.16 },
     fort: { stature: 1, shoulders: 1.18, legs: 0.97, arms: 0.99, girth: 1.34 },
     femme: { stature: 0.97, shoulders: 0.88, legs: 1.02, arms: 0.96, girth: 0.92 },
+    homme: { stature: 1.03, shoulders: 1.10, legs: 1.0, arms: 1.03, girth: 1.12 },
   };
   const BUILDS = MORPHOLOGIES;                      // ancien nom, conservé
 
@@ -401,6 +407,61 @@
     "nose", "eye_l", "eye_r", "ear_l", "ear_r",
     "shoulder_l", "elbow_l", "wrist_l", "hand_l", "shoulder_r", "elbow_r", "wrist_r", "hand_r",
     "hip_l", "knee_l", "ankle_l", "toe_l", "heel_l", "hip_r", "knee_r", "ankle_r", "toe_r", "heel_r"];
+
+  // ------------------------------------------------------- butées articulaires
+  // « cone » : écart maximal de l'os par rapport à sa direction de repos (degrés).
+  // « pli »  : flexion autorisée par rapport au segment parent (degrés, sens unique :
+  //            pas d'hyperextension pour un coude ou un genou).
+  // « sens » : direction dans laquelle le bout de l'os doit partir quand l'angle
+  // augmente (sert aux curseurs : un bras se lève vers l'extérieur, un genou plie
+  // vers l'arrière, la nuque se penche vers l'avant).
+  const LIMITS = {
+    neck: { cone: 45, pli: [-40, 45], sens: [0, 0, 1] },
+    head: { cone: 38, pli: [-35, 40], sens: [0, 0, 1] },
+    head_top: { cone: 18 },
+    shoulder_l: { cone: 28 }, shoulder_r: { cone: 28 },
+    // L'épaule tourne dans tous les plans : un seul cône, l'anti-collision fait le reste.
+    elbow_l: { cone: 170, sens: [1, 0, 0] },
+    elbow_r: { cone: 170, sens: [-1, 0, 0] },
+    wrist_l: { cone: 180, pli: [0, 150], sens: [0, 0, 1] },     // coude
+    wrist_r: { cone: 180, pli: [0, 150], sens: [0, 0, 1] },
+    hand_l: { cone: 100, pli: [0, 85], sens: [0, 0, 1] },       // poignet
+    hand_r: { cone: 100, pli: [0, 85], sens: [0, 0, 1] },
+    hip_l: { cone: 30 }, hip_r: { cone: 30 },
+    knee_l: { cone: 160, pli: [-25, 115], sens: [0, 0, 1] },    // hanche
+    knee_r: { cone: 160, pli: [-25, 115], sens: [0, 0, 1] },
+    ankle_l: { cone: 170, pli: [0, 145], sens: [0, 0, -1] },    // genou : vers l'arrière
+    ankle_r: { cone: 170, pli: [0, 145], sens: [0, 0, -1] },
+    toe_l: { cone: 110, pli: [-75, 40], sens: [0, 1, 0] },      // cheville : orteils vers le haut
+    toe_r: { cone: 110, pli: [-75, 40], sens: [0, 1, 0] },
+    heel_l: { cone: 110 }, heel_r: { cone: 110 },      // talon : solidaire du pied
+  };
+  for (const cote of ["l", "r"]) {
+    for (const base of ["shoulder", "elbow", "wrist", "hand", "hip", "knee", "ankle", "toe", "heel"]) {
+      const lim = LIMITS[base + "_l"];
+      if (lim) LIMITS[base + "_" + cote] = lim;
+    }
+  }
+  // Pli de repos (angle os/parent dans la pose debout) : les butées s'ajoutent à cette valeur.
+  const REST_BEND = {};
+  for (const name of BUILD_ORDER) {
+    const parent = PARENT[name];
+    const dir = REST_DIRS[name];
+    const dirParent = parent && REST_DIRS[parent];
+    REST_BEND[name] = (dir && dirParent) ? angleEntre(v(dir[0], dir[1], dir[2]), v(dirParent[0], dirParent[1], dirParent[2])) : 0;
+  }
+  // Articulations qui ne doivent jamais entrer dans le volume du tronc (coude dans le cou…).
+  const MEMBRES_TESTES = ["elbow_l", "wrist_l", "hand_l", "elbow_r", "wrist_r", "hand_r"];
+
+  // Tendons/élastiques : [articulation, os parent, os enfant] — dessinés du côté qui
+  // s'ouvre quand l'articulation plie, et d'autant plus tendus que le pli est marqué.
+  const TENDONS = [];
+  for (const cote of ["l", "r"]) {
+    TENDONS.push(["shoulder_" + cote, "shoulder_" + cote, "elbow_" + cote, [-1, 0, 0]]);
+    TENDONS.push(["elbow_" + cote, "elbow_" + cote, "wrist_" + cote, [1, 0, 0]]);
+    TENDONS.push(["hip_" + cote, "hip_" + cote, "knee_" + cote, [1, 0, 0]]);
+    TENDONS.push(["knee_" + cote, "knee_" + cote, "ankle_" + cote, [-1, 0, 0]]);
+  }
 
   /** Pose debout exacte, construite à partir des longueurs d'os. */
   function defaultPose(lengthsOrMorph) {
@@ -763,8 +824,9 @@
       // les chaînes de membres repassent par l'IK : le coude et le genou se placent
       // toujours du bon côté, même si la pose type demande une position extrême
       for (const ext of ["wrist_l", "wrist_r", "ankle_l", "ankle_r"]) {
-        this.moveJoint(ext, this.pose[ext]);
+        this.deplacer(ext, this.pose[ext]);
       }
+      this.clamp();
       this.preset = name;
       return this;
     }
@@ -784,7 +846,155 @@
      * Déplace une articulation : IK si c'est une extrémité, sinon rotation de la chaîne.
      * Les longueurs d'os restent exactes (proportions conservées).
      */
+    /**
+     * Règle l'angle d'une articulation en degrés (0 = position de repos, positif =
+     * flexion). Sert aux curseurs d'angles : l'os tourne autour de son axe de pliage,
+     * puis les butées et l'anti-collision s'appliquent.
+     */
+    setJointAngle(child, degres) {
+      const parent = PARENT[child];
+      if (!parent || !this.pose[child] || !this.pose[parent]) return this;
+      const lim = LIMITS[child];
+      if (!lim) return this;
+      const borne = lim.pli ? lim.pli : [-lim.cone, lim.cone];
+      const angle = Math.max(borne[0], Math.min(borne[1], degres));
+      const grand = PARENT[parent];
+      const dirParent = grand && this.pose[grand] ? norm(sub(this.pose[parent], this.pose[grand])) : v(0, 1, 0);
+      const dir = REST_DIRS[child];
+      if (!dir) return this;
+      const repos = norm(v(dir[0], dir[1], dir[2]));
+      let axe = norm(cross(repos, dirParent));
+      if (len(axe) < 0.2) axe = norm(cross(repos, v(1, 0, 0)));
+      if (len(axe) < 0.2) axe = norm(cross(repos, v(0, 1, 0)));
+      const candidats = [1, -1].map((sens) => norm(rotateAround(repos, mul(axe, sens), rad(angle))));
+      const pref = lim.sens ? v(lim.sens[0], lim.sens[1], lim.sens[2]) : null;
+      const note = (dir) => dot(mul(dir, this.lengths[child] || 0.2), pref);
+      const direction = pref && note(candidats[0]) < note(candidats[1]) ? candidats[1] : candidats[0];
+      const base = this.pose[parent];
+      const courant = norm(sub(this.pose[child], base));
+      // rotation rigide du membre sous l'articulation : les os suivent, l'articulation plie
+      const axeRotation = norm(cross(courant, direction));
+      const ecart = angleEntre(courant, direction);
+      if (len(axeRotation) > 1e-6 && ecart > 1e-9) {
+        for (const nom of this.descendants(child)) {
+          this.pose[nom] = add(base, rotateAround(sub(this.pose[nom], base), axeRotation, ecart));
+        }
+      }
+      this.enforce();
+      this.clamp();
+      return this;
+    }
+
+    /** Angle courant d'une articulation (degrés, 0 = repos) — pour les curseurs. */
+    jointAngle(child) {
+      const parent = PARENT[child];
+      if (!parent || !this.pose[child] || !this.pose[parent]) return 0;
+      const out = norm(sub(this.pose[child], this.pose[parent]));
+      const lim = LIMITS[child] || {};
+      const dir = REST_DIRS[child];
+      if (!lim.pli && dir) {
+        // articulation « à cône » (épaule) : écart signé par rapport à la position de repos
+        const repos = norm(v(dir[0], dir[1], dir[2]));
+        const pref = lim.sens ? v(lim.sens[0], lim.sens[1], lim.sens[2]) : v(0, 0, 1);
+        const sens = dot(out, pref) >= 0 ? 1 : -1;
+        return deg(angleEntre(out, repos)) * sens;
+      }
+      const grand = PARENT[parent];
+      const dirParent = grand && this.pose[grand] ? norm(sub(this.pose[parent], this.pose[grand])) : v(0, 1, 0);
+      return deg(angleEntre(out, dirParent) - (REST_BEND[child] || 0));
+    }
+
+    /** Copie de la pose (pour annuler un geste qui entre dans le corps). */
+    snapshot() {
+      const out = {};
+      for (const key in this.pose) out[key] = clone(this.pose[key]);
+      return out;
+    }
+
+    /** Restaure une pose copiée par snapshot(). */
+    restore(copie) {
+      const propre = {};
+      for (const key in copie) propre[key] = clone(copie[key]);
+      this.pose = propre;
+      return this;
+    }
+
+    /**
+     * Déplacement d'une articulation avec butées anatomiques et anti-collision :
+     * si le membre entrerait dans le tronc, la pose se rapproche au plus près par
+     * dichotomie — la main s'arrête sur le corps au lieu de le traverser.
+     */
     moveJoint(name, target) {
+      if (!this.pose[name]) return this;
+      const avant = this.snapshot();
+      const base = clone(this.pose[name]);
+      this.deplacer(name, target);
+      if (!this.collides()) return this;
+      let bon = 0, mauvais = 1;
+      for (let i = 0; i < 7; i++) {
+        const t = (bon + mauvais) / 2;
+        this.restore(avant);
+        this.deplacer(name, lerp(base, target, t));
+        if (this.collides()) mauvais = t; else bon = t;
+      }
+      this.restore(avant);
+      this.deplacer(name, lerp(base, target, bon));
+      return this;
+    }
+
+    /**
+     * Vrai si une articulation du bras est entrée dans le volume du tronc
+     * (le mannequin butte alors contre lui-même).
+     */
+    collides() {
+      const basse = this.pose.neck;
+      const ecart = Math.max(1e-3, basse.y - this.pose.hips.y);
+      for (const name of MEMBRES_TESTES) {
+        const p = this.pose[name];
+        if (!p || p.y > basse.y + 0.02) continue;
+        const f = Math.max(0, Math.min(1, (p.y - this.pose.hips.y) / ecart));
+        if (f <= 0.03) continue;
+        const taille = this.torsoSize(f);
+        const centre = this.torsoFrame(f).centre;
+        const dx = (p.x - centre.x) / Math.max(1e-3, taille.width / 2);
+        const dz = (p.z - centre.z) / Math.max(1e-3, taille.depth / 2);
+        if (dx * dx + dz * dz < 0.98) return true;
+      }
+      return false;
+    }
+
+    /** Ramène chaque os dans ses butées (cône autour du repos + charnière du parent). */
+    clamp() {
+      for (const name of BUILD_ORDER) {
+        const parent = PARENT[name];
+        if (!parent || !this.pose[name] || !this.pose[parent]) continue;
+        const lim = LIMITS[name];
+        if (!lim) continue;
+        const p = this.pose[parent];
+        const long = this.lengths[name] || dist(p, this.pose[name]);
+        const grandParent = PARENT[parent];
+        const dirParent = grandParent && this.pose[grandParent]
+          ? norm(sub(p, this.pose[grandParent])) : v(0, 1, 0);
+        let out = norm(sub(this.pose[name], p));
+        if (len(out) < 1e-9) continue;
+        if (lim.pli) {
+          const pli = deg(angleEntre(out, dirParent) - (REST_BEND[name] || 0));   // degrés, comme le tableau
+          const cible = Math.max(lim.pli[0], Math.min(lim.pli[1], pli));
+          if (Math.abs(cible - pli) > 1e-6) out = rotateAround(out, norm(cross(out, dirParent)), rad(pli - cible));
+        }
+        const dir = REST_DIRS[name];
+        if (lim.cone !== undefined && dir) {
+          const repos = norm(v(dir[0], dir[1], dir[2]));
+          const ecart = angleEntre(out, repos);
+          if (ecart > rad(lim.cone)) out = rotateAround(out, norm(cross(out, repos)), ecart - rad(lim.cone));
+        }
+        this.pose[name] = add(p, mul(out, long));
+      }
+      return this;
+    }
+
+    /** Déplacement brut (sans anti-collision) : sert à moveJoint et aux poses types. */
+    deplacer(name, target) {
       if (!this.pose[name]) return this;
       // pointe ou talon : le pied pivote d'un bloc autour de la cheville
       const sibling = FOOT[name];
@@ -802,6 +1012,16 @@
           this.pose[sibling] = add(ankle, mul(sibDir, this.lengths[sibling] || dist(ankle, this.pose[sibling])));
         }
         this.enforce();
+        this.clamp();
+        // le pied reste rigide : le talon suit exactement l'orientation de la pointe,
+        // même quand les butées ont retouché celle-ci.
+        const dirPointe = norm(sub(this.pose[name], ankle));
+        const ecart2 = angleEntre(newDir, dirPointe);
+        const axe2 = norm(cross(newDir, dirPointe));
+        if (len(axe2) > 1e-6 && ecart2 > 1e-9) {
+          const sibDir = rotateAround(norm(sub(this.pose[sibling], ankle)), axe2, ecart2);
+          this.pose[sibling] = add(ankle, mul(sibDir, this.lengths[sibling] || dist(ankle, this.pose[sibling])));
+        }
         return this;
       }
       const ik = IK_CHAINS[name];
@@ -820,12 +1040,14 @@
           this.pose[c] = add(this.pose[name], mul(dir, rest));
         }
         this.enforce();
+        this.clamp();
         return this;
       }
       // articulation « montante » : on déplace puis on remet la chaîne à longueur,
       // ce qui fait tourner les os parents sans changer leurs longueurs
       this.pose[name] = clone(target);
       this.enforce();
+      this.clamp();
       return this;
     }
 
@@ -1004,6 +1226,15 @@
         for (const j of JOINT_BALLS) {
           items.push({ type: "joint", p: projected[j], r: this.jointRadius(j), depth: projected[j].depth - 0.005 });
         }
+        if (m === "volume") {
+          for (const [joint, parentBone, childBone, axe] of TENDONS) {
+            const it = this.tendonItem(joint, parentBone, childBone, axe);
+            if (!it || !projected[joint]) continue;
+            // dessiné devant les deux segments qu'il relie (sinon le membre le recouvre)
+            it.depth = Math.min(projected[parentBone].depth, projected[childBone].depth) - 0.02;
+            items.push(it);
+          }
+        }
       }
       items.sort((p, q) => q.depth - p.depth);
 
@@ -1019,6 +1250,7 @@
         if (it.type === "torso") { this.drawTorso(ctx, it, m, view); continue; }
         if (it.type === "head") { this.drawHead(ctx, it, m, view); continue; }
         if (it.type === "foot") { this.drawFoot(ctx, it, m, view); continue; }
+        if (it.type === "tendon") { this.drawTendon(ctx, it, view); continue; }
         if (it.type === "joint") {
           const r = Math.max(1, it.r * it.p.scale);
           if (m === "silhouette") { ctx.fillStyle = "#ffffff"; }
@@ -1046,6 +1278,61 @@
       }
       if ((m === "volume" || m === "wireframe") && this.showHandles !== false) this.drawHandles(ctx, projected, m);
       return projected;
+    }
+
+    /**
+     * Tendon/élastique d'une articulation : attaches de part et d'autre, posées du
+     * côté qui s'ouvre quand l'articulation plie. `tension` va de 0 (repos) à 1 (pli
+     * maximal autorisé par les butées).
+     */
+    tendonItem(joint, parentBone, childBone, axePrefere) {
+      // `parentBone` se termine à l'articulation : son origine est le parent de cet os.
+      const origine = PARENT[parentBone] ? this.pose[PARENT[parentBone]] : null;
+      const a = origine || this.pose[parentBone];
+      const j = this.pose[joint], b = this.pose[childBone];
+      if (!a || !j || !b) return null;
+      const da = norm(sub(j, a)), db = norm(sub(b, j));
+      if (len(da) < 1e-6 || len(db) < 1e-6) return null;
+      const limite = LIMITS[childBone];
+      const pliMax = limite && limite.pli ? Math.max(1, limite.pli[1]) : 120;
+      const pli = Math.abs(angleEntre(da, db) - (REST_BEND[childBone] || 0));
+      const tension = Math.max(0, Math.min(1, (pli * 180 / Math.PI) / pliMax));
+      const rayon = Math.max(0.02, this.meanRadius(childBone) * profileAt(childBone, 0.06));
+      // Côté extérieur au pli : bissectrice extérieure (da - db). Membre tendu : côté préféré.
+      let dehors = norm(sub(da, db));
+      if (len(dehors) < 0.2) {
+        dehors = norm(cross(v(axePrefere[0], axePrefere[1], axePrefere[2]), da));
+      }
+      if (len(dehors) < 0.2) dehors = norm(cross(v(0, 1, 0), da));
+      if (len(dehors) < 0.2) dehors = v(0, 0, -1);
+      const pA = add(lerp(a, j, 0.86), mul(dehors, rayon * 0.34));
+      const pB = add(lerp(j, b, 0.18), mul(dehors, rayon * 0.34));
+      const ctrl = add(lerp(pA, pB, 0.5), mul(dehors, rayon * (0.06 + tension * 0.55)));
+      return { type: "tendon", A: pA, B: pB, ctrl: ctrl, tension: tension, rayon: rayon, joint: joint };
+    }
+
+    /** Dessine un tendon : ombre portée douce puis le cordon clair, tendu selon le pli. */
+    drawTendon(ctx, item, view) {
+      const A = project(item.A, view.opts), B = project(item.B, view.opts), C = project(item.ctrl, view.opts);
+      if (!A || !B || !C || !isFinite(A.x) || !isFinite(B.x)) return;
+      const largeur = Math.max(1.2, 0.0095 * ((A.scale + B.scale) / 2));
+      ctx.save();
+      ctx.lineCap = "round";
+      const trace = () => {
+        ctx.beginPath();
+        ctx.moveTo(A.x, A.y);
+        ctx.quadraticCurveTo(C.x, C.y, B.x, B.y);
+        ctx.stroke();
+      };
+      ctx.globalAlpha = 0.06 + 0.14 * item.tension;
+      ctx.strokeStyle = "#5a3226";
+      ctx.lineWidth = largeur * 1.6;
+      trace();
+      ctx.globalAlpha = 0.14 + 0.44 * item.tension;
+      ctx.strokeStyle = "#f2ddcd";
+      ctx.lineWidth = largeur * 0.9;
+      trace();
+      ctx.restore();
     }
 
     /** Rotule ombrée : dégradé radial décalé vers la lumière. */
@@ -1205,17 +1492,19 @@
       // yeux (un peu enfoncés dans l'orbite)
       const yeux = 0.60;
       for (const cote of [1, -1]) {
+        tache(surface(0.67, Math.PI / 2 + cote * 0.42), fr.largeur * 0.105, fr.largeur * 0.022, "#2b1a14", 0.22);
         tache(surface(yeux, Math.PI / 2 + cote * 0.42), fr.largeur * 0.10, fr.largeur * 0.052, "#4a3229", 0.5);
-        tache(surface(yeux + 0.05, Math.PI / 2 + cote * 0.42), fr.largeur * 0.13, fr.largeur * 0.04, "#2b1a14", 0.12);
+        tache(surface(yeux + 0.05, Math.PI / 2 + cote * 0.42), fr.largeur * 0.13, fr.largeur * 0.04, "#2b1a14", 0.08);
       }
-      // nez : arête claire puis narines
-      const nezHaut = surface(0.62, Math.PI / 2), nezBas = surface(0.47, Math.PI / 2);
-      tache(surface(0.55, Math.PI / 2), fr.largeur * 0.075, fr.largeur * 0.115, "#fff2e8", 0.30);
-      tache(add(nezHaut, v(0, 0, 0)), fr.largeur * 0.02, fr.largeur * 0.02, "#c9a48f", 0.25);
-      void nezBas;
+      // nez : arête claire, flanc ombré, narines
+      tache(surface(0.58, Math.PI / 2), fr.largeur * 0.028, fr.largeur * 0.075, "#fff2e8", 0.30);
+      tache(surface(0.55, Math.PI / 2 + 0.24), fr.largeur * 0.045, fr.largeur * 0.07, "#4a2c22", 0.16);
+      for (const cote of [1, -1]) {
+        tache(surface(0.475, Math.PI / 2 + cote * 0.10), fr.largeur * 0.016, fr.largeur * 0.012, "#3c2a24", 0.34);
+      }
       // bouche et menton
       tache(surface(0.34, Math.PI / 2), fr.largeur * 0.13, fr.largeur * 0.035, "#6d3f34", 0.42);
-      tache(surface(0.20, Math.PI / 2), fr.largeur * 0.10, fr.largeur * 0.05, "#ffe7d8", 0.18);
+      tache(surface(0.20, Math.PI / 2), fr.largeur * 0.065, fr.largeur * 0.032, "#ffe7d8", 0.12);
       // oreilles
       for (const cote of [1, -1]) {
         tache(surface(0.55, cote * 0.02), fr.largeur * 0.045, fr.largeur * 0.085, "#d3a98f", 0.85);
