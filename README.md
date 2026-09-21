@@ -3,7 +3,7 @@
 Interface web **simple, 100 % locale** pour générer et éditer des images au format **GGUF**,
 propulsée par [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp).
 
-Les trois modèles se téléchargent **en un clic depuis l'interface** (onglet **Modèles**), avec les
+Les modèles se téléchargent **en un clic depuis l'interface** (onglet **Modèles**), avec les
 fichiers nécessaires à la génération **et** à l'édition d'image :
 
 | Modèle | Points forts | Réglages par défaut | Pack complet |
@@ -11,12 +11,17 @@ fichiers nécessaires à la génération **et** à l'édition d'image :
 | [Qwen‑Image‑2.1](https://huggingface.co/Qwen/Qwen-Image-2.1) (7B) | Qualité maximale, texte dans l'image | 30 étapes, CFG 6 | ≈ 11,1 Go<br>diffusion Q4_K + Qwen3‑VL‑8B Q4_K_M + VAE + mmproj (édition) |
 | [FLUX.2 klein 9B](https://huggingface.co/unsloth/FLUX.2-klein-9B-GGUF) | Rapide, meilleure qualité que le 4B | 4 étapes, CFG 1 | ≈ 13,2 Go<br>diffusion Q6_K + Qwen3‑8B Q4_K_M + VAE |
 | [FLUX.2 klein 4B](https://huggingface.co/unsloth/FLUX.2-klein-4B-GGUF) | Très rapide, léger | 4 étapes, CFG 1 | ≈ 8,9 Go<br>diffusion Q8_0 + Qwen3‑4B Q8_0 + VAE |
+| **SD 1.5 + ControlNet (pose)** | **Pilotage de la pose des personnages**, détection automatique, retouche d'une photo | 25 étapes, CFG 7 | ≈ 5,0 Go<br>SD 1.5 + ControlNet OpenPose + ControlNet Canny + détecteur de pose (13 Mo) |
 
 - Zéro dépendance lourde : pas de PyTorch, pas de CUDA toolkit à installer.
 - Le moteur (binaire précompilé) et les modèles se téléchargent **en un clic** depuis l'interface.
 - **Édition d'image** : image(s) de référence + instruction dans le prompt.
   Qwen‑Image‑2.1 utilise l'encodeur de vision (`mmproj`, inclus dans son pack) ;
   FLUX.2 klein édite **sans fichier supplémentaire**.
+- **ControlNet** (famille *SD 1.5 + ControlNet* — les modèles Qwen/FLUX, de type « DiT », ne le gèrent pas
+  dans stable-diffusion.cpp) : détection **automatique** des personnages sur une photo, squelette de pose
+  modifiable à la souris, contours (Canny), et génération ou **modification d'image** (img2img) qui
+  conserve la posture.
 - Choix de la quantification (Q2_K → Q8_0/BF16) pour chaque modèle, taille affichée avant téléchargement.
 - Téléchargements repris après coupure, progression **fichier par fichier**, annulation possible.
 - Galerie avec seed, réglages, réutilisation en un clic.
@@ -29,6 +34,8 @@ fichiers nécessaires à la génération **et** à l'édition d'image :
 - [Python 3.10+](https://www.python.org/downloads/) (Windows : cocher **"Add python.exe to PATH"**).
 - ~12 Go d'espace disque pour l'installation recommandée (jusqu'à ~25 Go si vous prenez les trois modèles).
 - 8 Go de VRAM minimum conseillés (16 Go confortable) ; le déchargement en RAM est activé par défaut.
+- Pour ControlNet : `numpy` et `opencv-python-headless` (installés avec `pip install -r requirements.txt`) ;
+  `onnxruntime` est optionnel (accélère la détection, repli automatique sur OpenCV DNN).
 
 ## Démarrage rapide
 
@@ -47,6 +54,8 @@ Le navigateur s'ouvre sur `http://127.0.0.1:7860`. Ensuite :
 3. Onglet **Générer** : choisir le modèle, écrire un prompt, cliquer **Générer**.
    Pour éditer une image : passer en mode **✏️ Éditer une image**, ajouter les images de référence
    et décrire la modification dans le prompt.
+4. Pour **imposer ou corriger une pose** : installez la famille **SD 1.5 + ControlNet** (≈ 5 Go),
+   puis utilisez la carte « 🧍 Personnages, pose et composition » (voir ci‑dessous).
 
 ## Générer ou éditer (onglet Générer)
 
@@ -60,11 +69,45 @@ Deux modes, en haut du formulaire :
   en un clic.
   Qwen‑Image‑2.1 utilise `--llm_vision` (mmproj) ; FLUX.2 klein édite nativement avec `-r`.
 
+## Personnages, pose et composition — ControlNet (onglet Générer)
+
+La carte **🧍 Personnages, pose et composition** permet de **placer ou corriger la pose** d'un ou
+plusieurs personnages, et de **conserver cette pose pendant la génération ou la modification d'image**.
+
+1. Modèle : choisissez **« SD 1.5 + ControlNet (pose) »** (onglet Modèles → ⬇ Tout télécharger, ≈ 5 Go ;
+   le pack contient SD 1.5, les deux modèles ControlNet — OpenPose et Canny — et le détecteur de
+   personnages `yolov8n-pose.onnx`). Les modèles Qwen‑Image‑2.1 et FLUX.2 klein sont des modèles
+   « DiT » : stable-diffusion.cpp ne sait pas leur appliquer ControlNet, l'interface le signale et
+   propose la bascule vers cette famille en un clic.
+2. Type de contrôle :
+   - **Pose des personnages** : cliquez sur **🔍 Détecter les personnages** → chaque personne de la
+     photo est trouvée automatiquement (YOLOv8‑pose, 17 points par personne) et un squelette est dessiné.
+     Le détecteur est local, aucune connexion n'est nécessaire après le téléchargement (~13 Mo).
+   - **Contours / composition (Canny)** : pour suivre le contour d'un objet, d'un décor ou d'un logo
+     plutôt qu'une posture.
+3. **Ajustez la pose** : dans l'éditeur, faites glisser une articulation (points jaunes = déplacés,
+   « ↺ Réinitialiser » revient à la détection). L'aperçu « Image de contrôle envoyée au modèle » est
+   mis à jour, et c'est **cette** image qui part dans `--control-image`.
+4. **Force du contrôle** : 0,3 = simple suggestion, 0,8–1,0 = pose respectée fermement. Au‑delà de 1,0,
+   le squelette peut figer le rendu (tenue, décor).
+5. **Modifier une photo en gardant la pose** : cochez **« Repartir de la photo (img2img) »** (force 0,45
+   par défaut = la photo reste très présente, 0,7 = plus de liberté) et décrivez la transformation :
+   `« la même personne, en armure dorée, dans un décor de neige »`. La génération part de votre photo,
+   guidée par le prompt **et** par le squelette.
+6. Sources possibles pour la détection : l'image de référence ajoutée en mode Édition, un autre fichier
+   (`Autre fichier…`), ou la dernière image générée (`Dernière image générée`) — pratique pour
+   « corriger » une pose obtenue par hasard.
+
+Sous le capot, la commande envoyée à `sd-cli` est
+`--control-net <modèle> --control-image <squelette|contours> --control-strength <force>`
+(+ `-i <photo> --strength <force img2img>` en modification d'image).
+
 ## Télécharger les modèles (onglet Modèles)
 
 - **Installation en un clic** : pour un modèle, le pack contient le fichier de diffusion choisi,
   l'encodeur de texte, le VAE et — pour Qwen‑Image‑2.1 — l'encodeur de vision (`mmproj`) indispensable
-  à l'édition. Les fichiers déjà présents sont simplement ignorés (« déjà présent »).
+  à l'édition. Pour **SD 1.5 + ControlNet**, il ajoute les modèles ControlNet (OpenPose + Canny) et le
+  détecteur de personnages. Les fichiers déjà présents sont simplement ignorés (« déjà présent »).
 - **Édition incluse d'office** : la case « Télécharger aussi l'encodeur de vision (mmproj) » est cochée
   par défaut pour Qwen‑Image‑2.1. FLUX.2 klein n'a besoin d'aucun fichier supplémentaire pour éditer.
 - **Fichiers à l'unité** : dépliez « Fichiers installés, autres variantes et URL directe » pour
@@ -89,8 +132,12 @@ models/flux2_klein_4b/diffusion/      flux-2-klein-4b-*.gguf
 models/flux2_klein_4b/text_encoder/   Qwen3-4B-*.gguf
 models/flux2_klein_4b/vae/            flux2-vae.safetensors
 models/flux2_klein_9b/…               idem avec flux-2-klein-9b-*.gguf et Qwen3-8B-*.gguf
+models/sd15_control/diffusion/        v1-5-pruned-emaonly.safetensors (UNet + CLIP + VAE)
+models/sd15_control/controlnet/       control_v11p_sd15_openpose.safetensors, …_canny.safetensors
+models/sd15_control/pose_detector/    yolov8n-pose.onnx (détection automatique des personnages)
 models/<modèle>/lora/                 LoRA optionnels (syntaxe <lora:nom:0.8> dans le prompt)
-outputs/                              images générées + .json de métadonnées
+uploads/                              images téléversées + uploads/controls/ (squelettes, contours)
+outputs/                              images générées + .json de métadonnées (pose/force utilisées)
 ```
 
 Une URL directe peut aussi être collée dans le champ prévu pour télécharger n'importe quel fichier.
@@ -111,20 +158,32 @@ Pour les deux modèles FLUX.2 klein, l'édition fonctionne directement : passez 
 et décrivez la modification dans le prompt.
 Dimensions toujours arrondies au multiple de 32.
 
+Pour la famille **SD 1.5 + ControlNet**, restez en 512×512 / 512×768 : le modèle et les ControlNet
+sont entraînés pour cette résolution (au‑delà, la pose est moins bien suivie). 25 étapes et CFG 7 sont
+de bons réglages de départ.
+
 ## Tests
 
 ```bash
 pip install -r requirements-dev.txt     # pytest + httpx
-python -m pytest -q                     # 24 tests : catalogue, téléchargements, API, commande sd-cli
+python -m pytest -q                     # 54 tests : catalogue, téléchargements, API, pose, commande sd-cli
 
 npm install jsdom                       # une seule fois, pour les tests d'interface
 node tests/ui_render.mjs                # rejoue app.js sur un vrai /api/status (serveur lancé)
 node tests/ui_render.mjs status.json    # …ou sur une réponse enregistrée
 ```
 
-`tests/ui_render.mjs` vérifie que l'onglet Modèles affiche bien les trois modèles, le bouton
+`tests/ui_render.mjs` vérifie que l'onglet Modèles affiche bien les quatre modèles, le bouton
 « Tout télécharger », la présence de l'édition d'image, et que le clic déclenche exactement
 `POST /api/install` (avec la quantification choisie), puis le suivi fichier par fichier et l'annulation.
+Il rejoue aussi la carte ControlNet : refus expliqué sur les modèles « DiT », bascule en un clic vers
+SD 1.5 + ControlNet, détection automatique de la pose, glisser‑déposer d'une articulation
+(`POST /api/control/pose`) et envoi des paramètres de contrôle à `POST /api/generate`.
+
+`tests/data/fake-yolov8n-pose.onnx` est un **faux** réseau YOLOv8‑pose de 1,3 ko (généré par
+`tests/data/make_fake_onnx.py`) qui encode une pose connue : les tests valident ainsi le chargement ONNX,
+l'inférence, le décodage des 17 points et le rendu du squelette **sans télécharger** les 13 Mo du vrai
+modèle. Les fonctions pures de `app/pose.py` (décodage, NMS, squelette, Canny) sont testées séparément.
 
 ## Accès depuis un autre appareil du réseau local
 
@@ -145,6 +204,15 @@ python run.py --host 0.0.0.0 --port 7860
 - **Très lent** : vérifier que la variante `cuda` (et non `cpu`/`vulkan`) est installée, et que *flash attention* est cochée.
 - **Édition d'image refusée (Qwen‑Image‑2.1)** : téléchargez l'encodeur de vision (mmproj) —
   bouton dédié dans l'onglet Générer ou case à cocher du pack dans l'onglet Modèles.
+- **« Ce modèle ne peut pas utiliser ControlNet »** : normal pour Qwen‑Image‑2.1 et FLUX.2 klein
+  (modèles « DiT »). Cliquez sur le bouton de bascule vers **SD 1.5 + ControlNet**, ou retirez le contrôle.
+- **« Aucun personnage détecté »** : cadrez la photo de plus près, évitez les silhouettes minuscules ou
+  trop sombres ; vous pouvez aussi importer un squelette de référence (bouton « Choisir un squelette de
+  référence… ») ou utiliser le contrôle Canny.
+- **« Détecteur de personnages absent »** : onglet Modèles → famille **SD 1.5 + ControlNet** →
+  « Tout télécharger » (ou le bouton « Télécharger maintenant » affiché dans la carte).
+- **La pose détectée n'est pas suivie** : augmentez la force du contrôle (0,9–1,1), restez en 512×768,
+  et vérifiez que le squelette affiché correspond bien à la posture voulue.
 - **Une nouveauté de l'interface n'apparaît pas** : rechargez avec **Ctrl+F5** (les URL des scripts sont
   horodatées, mais un vieux cache de navigateur peut persister).
 - Le journal complet de `sd-cli` est visible sous la barre de progression.
@@ -152,4 +220,5 @@ python run.py --host 0.0.0.0 --port 7860
 ## Licence
 
 Code de cette application : MIT. Les modèles ont leur propre licence (Qwen Research License pour Qwen‑Image‑2.1,
-FLUX Non‑Commercial License pour FLUX.2 klein 9B, Apache‑2.0 pour FLUX.2 klein 4B).
+FLUX Non‑Commercial License pour FLUX.2 klein 9B, Apache‑2.0 pour FLUX.2 klein 4B,
+CreativeML OpenRAIL‑M pour SD 1.5 et les ControlNet de lllyasviel).

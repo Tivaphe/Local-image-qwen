@@ -93,3 +93,13 @@ button.link{background:none;border:none;color:#fff;text-decoration:underline;cur
 details.files{margin-top:10px}
 details.files>summary{cursor:pointer;color:var(--muted);font-size:13.5px}
 .grid2 select{margin-top:4px}
+
+/* ---------------- contrôle de pose (ControlNet) ---------------- */
+.control-preview{width:100%;max-height:230px;object-fit:contain;background:#0a0c10;border:1px solid var(--border);border-radius:8px;margin-top:4px}
+#poseEditor{margin-top:10px;border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--panel2)}
+#poseCanvas{width:100%;max-width:520px;height:auto;border-radius:8px;background:#0a0c10;cursor:crosshair;touch-action:none;display:block}
+#poseEditor .row{align-items:center}
+.pose-tip{color:#c9bbff}
+.tag.kpt{background:#2b2550;color:#c9bbff;margin-left:4px}
+#controlStatus.ok{color:var(--ok)}
+#controlStatus.warn{color:var(--warn)}

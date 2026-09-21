@@ -23,9 +23,11 @@ from app import paths  # noqa: E402
 @pytest.fixture()
 def sandbox(tmp_path, monkeypatch):
     """Redirige models/ et config.json vers un dossier temporaire."""
+    from app import catalog
+
     models = tmp_path / "models"
-    for fam in ("qwen_image_2.1", "flux2_klein_4b", "flux2_klein_9b"):
-        for cat in ("diffusion", "text_encoder", "vae", "vision", "lora"):
+    for fam in catalog.FAMILIES:
+        for cat in catalog.CATEGORIES:
             (models / fam / cat).mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(paths, "MODELS_DIR", models)
     monkeypatch.setattr(paths, "CONFIG_FILE", tmp_path / "config.json")
@@ -61,6 +63,8 @@ def file_server(tmp_path):
     (served / "encoder-test.gguf").write_bytes(payload)
     (served / "vae-test.safetensors").write_bytes(payload)
     (served / "vision-test.gguf").write_bytes(payload)
+    (served / "pose-test.onnx").write_bytes(payload)
+    (served / "control-test.safetensors").write_bytes(payload)
 
     handler = functools.partial(_Quiet, directory=str(served))
     with socketserver.ThreadingTCPServer(("127.0.0.1", 0), handler) as httpd:

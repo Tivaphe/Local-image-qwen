@@ -25,9 +25,11 @@ const CAT_LABELS = {
   text_encoder: "Encodeur de texte (GGUF)",
   vae: "VAE",
   vision: "Encodeur de vision (mmproj) — édition d'image",
+  controlnet: "Modèles ControlNet (pose, contours)",
+  pose_detector: "Détecteur de personnages (pose automatique)",
   lora: "LoRA (optionnel)",
 };
-const CAT_ORDER = ["diffusion", "text_encoder", "vae", "vision", "lora"];
+const CAT_ORDER = ["diffusion", "text_encoder", "vae", "vision", "controlnet", "pose_detector", "lora"];
 const SELECTABLE = ["diffusion", "text_encoder", "vae", "vision"];
 const postJSON = (url, body) => api(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 const famById = (id) => (STATUS && STATUS.families ? STATUS.families.find((f) => f.id === id) : null);
@@ -127,6 +129,12 @@ function renderAll() {
   renderActiveFiles();
   renderPaths();
   renderGeneration(STATUS.generation);
+  renderControl();
+  bindPoseEditor();
+
+// Les tests d'interface (tests/ui_render.mjs, jsdom) ont besoin de lire l'état du
+// contrôle : les déclarations `const` ne sont pas visibles depuis un autre script.
+window.__liq = { control: CONTROL, applyPoseEdits, drawPoseEditor };
 }
 
 function renderEngine() {
@@ -167,8 +175,10 @@ function optionsFor(fam, cat) {
 /** Fichiers du pack (génération + édition) et état de présence de chacun. */
 function packPlan(fam) {
   const ch = choice(fam.id);
-  let cats = ["diffusion", "text_encoder", "vae"];
+  let cats = (fam.required_selections || ["diffusion", "text_encoder", "vae"]).slice();
   if (fam.edit_requires_vision && !ch.visionOff) cats = cats.concat(["vision"]);
+  // familles ControlNet : le pack comprend le modèle de contrôle et le détecteur de personnages
+  if (fam.supports_controlnet) cats = cats.concat(["controlnet", "pose_detector"]);
   const out = [];
   for (const cat of cats) {
     const options = optionsFor(fam, cat);
@@ -229,10 +239,16 @@ function renderModels() {
     const card = document.createElement("div");
     card.className = "fam";
     card.dataset.fam = fam.id;
+    const isControl = !!fam.supports_controlnet;
     const pill = st.ready && st.edit_ready ? "ok" : st.ready ? "part" : st.file_count ? "part" : "ko";
-    const pillTxt = st.ready && st.edit_ready ? "✔ prêt (génération + édition)"
+    let pillTxt = st.ready && st.edit_ready ? "✔ prêt (génération + édition)"
       : st.ready && !st.edit_ready ? "✔ génération · édition : mmproj manquant"
         : st.file_count ? "⚠ incomplet" : "❌ non installé";
+    if (isControl) {
+      pillTxt = st.ready
+        ? (st.control_ready ? "✔ prêt (génération + pose ControlNet)" : "✔ génération · pose : modèle ControlNet manquant")
+        : st.file_count ? "⚠ incomplet" : "❌ non installé";
+    }
 
     const diffusionCat = optionsFor(fam, "diffusion");
     const teCat = optionsFor(fam, "text_encoder");
@@ -481,6 +497,16 @@ $("#btnGenerate").onclick = async () => {
     showGenerateError("Mode édition : ajoutez au moins une image de référence dans la carte « Édition d'image ».");
     return;
   }
+  if (CONTROL.type && CONTROL.id && !controlCapable()) {
+    showGenerateError("Le modèle sélectionné n'accepte pas ControlNet (architectures DiT). "
+      + "Choisissez le modèle « SD 1.5 + ControlNet (pose) » : la pose détectée sera appliquée.");
+    return;
+  }
+  if (CONTROL.type && CONTROL.id && CONTROL.type === "pose" && !controlnetPresent("pose")) {
+    showGenerateError("Modèle ControlNet OpenPose manquant : téléchargez-le dans l'onglet Modèles "
+      + "(famille « SD 1.5 + ControlNet »).");
+    return;
+  }
   if (MODE === "edit" && !STATUS.edit_ready) {
     showGenerateError("Mode édition : ce modèle a besoin de l'encodeur de vision (mmproj). "
       + "Cliquez sur « ⬇ Télécharger l'encodeur de vision (édition) » ou allez dans l'onglet Modèles.");
@@ -495,6 +521,18 @@ $("#btnGenerate").onclick = async () => {
   fd.append("cfg_scale", $("#cfg").value);
   fd.append("sampler", $("#sampler").value);
   fd.append("seed", $("#seed").value);
+  fd.append("mode", MODE);
+  if (CONTROL.type && CONTROL.id) {
+    fd.append("control_type", CONTROL.type);
+    fd.append("control_id", CONTROL.id);
+    fd.append("control_strength", $("#controlStrength").value);
+    const cn = controlnetFor(CONTROL.type);
+    if (cn) fd.append("control_net", cn.id);
+  }
+  if (controlCapable()) {
+    fd.append("use_init", $("#useInit").checked ? "true" : "false");
+    fd.append("strength", $("#strength").value);
+  }
   refs.forEach((f) => fd.append("ref_images", f));
   $("#errorBox").classList.add("hidden");
   try {
@@ -543,6 +581,10 @@ function renderGeneration(g) {
       $("#resultMeta").innerHTML = `${m.family ? (f ? f.name : m.family) + " · " : ""}Seed <b>${m.seed}</b> · ${m.width}×${m.height} · ${m.steps} étapes · CFG ${m.cfg_scale} · ${m.elapsed_s} s
         <button class="ghost" id="reuseSeed">↺ réutiliser la seed</button>`;
       $("#reuseSeed").onclick = () => ($("#seed").value = m.seed);
+      $("#resultControl").innerHTML = m.control_type
+        ? `🧍 contrôle : ${m.control_type === "pose" ? "pose des personnages" : "contours (Canny)"} · force ${m.control_strength}`
+          + (m.init_image ? ` · img2img depuis ${esc(m.init_image)} (force ${m.strength})` : "")
+        : "";
     }).catch(() => {});
   }
 }
@@ -613,6 +655,410 @@ $("#btnFixEdit").onclick = async () => {
   catch (e) { alert(e.message); }
   refreshStatus();
 };
+
+
+// ======================================================================
+//  Personnages, pose et composition (ControlNet)
+// ======================================================================
+const SKELETON_LIMBS = [
+  [0, 1], [0, 2], [1, 3], [2, 4],
+  [5, 6], [5, 7], [7, 9], [6, 8], [8, 10],
+  [5, 11], [6, 12], [11, 12],
+  [11, 13], [13, 15], [12, 14], [14, 16],
+];
+const JOINT_NAMES = ["nez", "œil g.", "œil d.", "oreille g.", "oreille d.", "épaule g.", "épaule d.",
+  "coude g.", "coude d.", "poignet g.", "poignet d.", "hanche g.", "hanche d.",
+  "genou g.", "genou d.", "cheville g.", "cheville d."];
+
+const CONTROL = {
+  type: "", id: "", url: "", width: 0, height: 0,
+  persons: [], detected: null, sourceUrl: "", sourceId: "", sourceKind: "ref",
+  backend: "", status: "", busy: false, editor: false,
+};
+
+function controlFamily() {
+  if (!STATUS || !STATUS.control) return null;
+  return famById(STATUS.control.control_family);
+}
+
+function controlCapable() {
+  const fam = famById(STATUS?.config?.family);
+  return !!(fam && fam.supports_controlnet);
+}
+
+function controlnetFor(type) {
+  const list = (STATUS.control.controlnets || []);
+  const want = type === "canny" ? "canny" : "openpose";
+  return list.find((c) => (c.mode || "").includes(want)) || list[0];
+}
+
+function controlnetPresent(type) {
+  const cat = controlFamily();
+  if (!cat) return false;
+  const file = controlnetFor(type);
+  return !!file && (STATUS.models[cat.id].controlnet || []).some((m) => m.name === file.id);
+}
+
+function poseModelPresent() {
+  const cat = controlFamily();
+  if (!cat) return false;
+  return (STATUS.models[cat.id].pose_detector || []).length > 0;
+}
+
+function setControlStatus(msg, kind = "") {
+  const el = $("#controlStatus");
+  el.textContent = msg || "";
+  el.className = "small " + kind;
+}
+
+// --------------------------------------------------------------- affichage
+function renderControl() {
+  const card = $("#poseCard");
+  if (!card || !STATUS || !STATUS.control) return;
+  const capable = controlCapable();
+  const fam = famById(STATUS.config.family);
+  const warn = $("#controlUnsupported");
+  const body = $("#controlBody");
+  const cat = controlFamily();
+
+  if (!capable) {
+    warn.innerHTML = `ℹ️ <b>${esc(fam ? fam.name : "Ce modèle")} n'accepte pas ControlNet.</b>
+      ${esc((fam && fam.control_reason) || "")}
+      <button class="primary" id="btnSwitchControl" style="margin-top:8px">→ Utiliser « ${esc(cat ? cat.name : "SD 1.5 + ControlNet")} »</button>`;
+    warn.classList.remove("hidden");
+    const sw = $("#btnSwitchControl");
+    if (sw) sw.onclick = () => switchFamily((cat && cat.id) || "sd15_control");
+  } else {
+    warn.classList.add("hidden");
+  }
+  body.classList.toggle("hidden", false);
+  card.classList.toggle("dim", !capable);
+
+  // type de contrôle
+  const sel = $("#controlType");
+  if (sel.value !== CONTROL.type) sel.value = CONTROL.type;
+  const needsPoseModel = CONTROL.type === "pose";
+  const missing = [];
+  if (CONTROL.type && !controlnetPresent(CONTROL.type)) missing.push(controlnetFor(CONTROL.type));
+  if (needsPoseModel && !poseModelPresent()) missing.push((STATUS.control.pose_models || [])[0]);
+  const box = $("#controlMissing");
+  if (missing.length && capable) {
+    box.innerHTML = "⬇️ Fichier(s) nécessaire(s) au contrôle de la pose encore absent(s) : <b>"
+      + missing.map((m) => esc(m ? m.label : "?")).join("</b>, <b>")
+      + "</b> <button class=\"primary\" id=\"btnControlDownload\">Télécharger maintenant</button>";
+    box.classList.remove("hidden");
+    const b = $("#btnControlDownload");
+    if (b) b.onclick = async () => {
+      b.disabled = true; b.textContent = "⏳ téléchargement…";
+      try {
+        for (const m of missing) {
+          if (!m) continue;
+          const category = (m.mode === undefined) ? "pose_detector" : "controlnet";
+          await postJSON("/api/download", { family: cat.id, category, file_id: m.id });
+        }
+      } catch (e) { alert(e.message); }
+      refreshStatus();
+    };
+  } else box.classList.add("hidden");
+
+  // état
+  const pose = STATUS.control.pose || {};
+  const bits = [];
+  if (!capable) bits.push("modèle actif incompatible");
+  if (pose.cv === false) bits.push("NumPy/OpenCV manquants — installez requirements.txt");
+  if (CONTROL.type === "pose" && !poseModelPresent()) bits.push("détecteur de personnages à télécharger (13 Mo)");
+  if (CONTROL.type && !controlnetPresent(CONTROL.type)) bits.push("modèle ControlNet à télécharger (0,7 Go)");
+  if (CONTROL.status) bits.push(CONTROL.status);
+  else if (CONTROL.backend) bits.push("détection : " + CONTROL.backend);
+  setControlStatus(bits.join(" · "), bits.length ? "warn" : "ok");
+
+  // aperçus
+  const show = !!CONTROL.url;
+  $("#controlPreviewWrap").classList.toggle("hidden", !show);
+  if (show) {
+    $("#controlPreview").src = CONTROL.url;
+    $("#controlSourcePreview").src = CONTROL.sourceUrl || CONTROL.url;
+  }
+  $("#poseEditor").classList.toggle("hidden", !(CONTROL.editor && CONTROL.persons.length));
+  $("#controlInitWrap").classList.toggle("hidden", !capable);
+  $("#controlHint").textContent = CONTROL.status
+    || (CONTROL.type === "pose"
+      ? "Détectez les personnages d'une photo (ou importez un squelette), ajustez la pose, puis générez : la posture est conservée."
+      : "Choisissez un type de contrôle puis cliquez sur « Détecter les personnages » (pose) ou lancez le calcul des contours (Canny).");
+  if (CONTROL.persons.length && CONTROL.editor) drawPoseEditor();
+}
+
+function switchFamily(id) {
+  const fs = $("#family");
+  if (!fs || !famById(id)) return;
+  fs.value = id;
+  fs.onchange({ target: fs });
+}
+
+// --------------------------------------------------------------- détection
+function quietError(msg) {
+  const e = new Error(msg);
+  e.silent = true;          // pas de fenêtre d'alerte : le message s'affiche dans la carte
+  return e;
+}
+
+async function sourceImageFile() {
+  const kind = $("#controlSource").value;
+  if (kind === "ref") {
+    const f = [...$("#refs").files][0];
+    if (!f) throw quietError("Ajoutez d'abord une image dans « Édition d'image — images de référence », "
+      + "ou choisissez « Autre fichier… ».");
+    return f;
+  }
+  if (kind === "file") {
+    const f = $("#controlFile").files[0];
+    if (!f) { $("#controlFile").click(); throw quietError("Choisissez une image avec « Autre fichier… »."); }
+    return f;
+  }
+  // dernière image générée
+  const items = await api("/api/gallery");
+  if (!items.length) throw new Error("Aucune image générée pour l'instant.");
+  const r = await fetch("/outputs/" + items[0].file);
+  const blob = await r.blob();
+  return new File([blob], items[0].file, { type: blob.type || "image/png" });
+}
+
+async function detectControl(kind) {
+  const btn = $("#btnDetect");
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = kind === "canny" ? "⏳ calcul des contours…" : "⏳ détection des personnages…";
+  setControlStatus("Traitement de l'image…");
+  try {
+    const file = await sourceImageFile();
+    const fd = new FormData();
+    fd.append("image", file);
+    fd.append("kind", kind);
+    fd.append("background", "black");
+    const r = await api("/api/control/detect", { method: "POST", body: fd });
+    CONTROL.type = r.kind;
+    CONTROL.id = r.control.id;
+    CONTROL.url = r.control.url;
+    CONTROL.width = r.control.width;
+    CONTROL.height = r.control.height;
+    CONTROL.persons = r.persons || [];
+    CONTROL.detected = r.persons ? JSON.parse(JSON.stringify(r.persons)) : null;
+    CONTROL.sourceUrl = r.source.url;
+    CONTROL.sourceId = r.source.id;
+    CONTROL.backend = r.backend || "";
+    CONTROL.status = r.message || "";
+    CONTROL.editor = kind === "pose";
+    $("#controlType").value = kind;
+    if (kind === "pose" && CONTROL.persons.length) {
+      $("#controlSourcePreview").onload = () => drawPoseEditor();
+    }
+    renderControl();
+    $("#controlSourcePreview").src = CONTROL.sourceUrl;
+  } catch (e) {
+    CONTROL.status = "";
+    renderControl();                       // réaffiche l'état réel (fichiers manquants, etc.)
+    setControlStatus("⚠️ " + e.message, "warn");
+    if (!e.silent) alert(e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
+// ------------------------------------------------------- éditeur de squelette
+function poseImage() {
+  return window.__poseImg && window.__poseImg.src === CONTROL.sourceUrl ? window.__poseImg : null;
+}
+
+function loadPoseImage(url) {
+  if (window.__poseImg && window.__poseImg.src === url) return Promise.resolve(window.__poseImg);
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (img) => {
+      if (done) return;
+      done = true;
+      window.__poseImg = img;
+      resolve(img);
+    };
+    const img = new Image();
+    img.onload = () => finish(img);
+    img.onerror = () => finish(null);
+    setTimeout(() => finish(null), 2000);      // image lente : on dessine quand même le squelette
+    img.src = url;
+  });
+}
+
+async function drawPoseEditor() {
+  const canvas = $("#poseCanvas");
+  if (!canvas || !CONTROL.persons.length) return;
+  const img = await loadPoseImage(CONTROL.sourceUrl);
+  const natural = img ? { w: img.naturalWidth, h: img.naturalHeight } : { w: CONTROL.width, h: CONTROL.height };
+  const maxW = Math.min(520, canvas.parentElement.clientWidth - 20 || 520);
+  const scale = Math.min(maxW / natural.w, 520 / natural.h);
+  canvas.width = Math.round(natural.w * scale);
+  canvas.height = Math.round(natural.h * scale);
+  canvas.dataset.scale = scale;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;                      // navigateur sans canvas 2D : aperçu uniquement
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#0a0c10";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (img) {
+    ctx.globalAlpha = 0.55;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    ctx.globalAlpha = 1;
+  }
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "#7c5cff";
+  for (const p of CONTROL.persons) {
+    for (const [a, b] of SKELETON_LIMBS) {
+      const ka = p.keypoints[a], kb = p.keypoints[b];
+      if (!ka || !kb || !ka.visible || !kb.visible) continue;
+      ctx.beginPath();
+      ctx.moveTo(ka.x * scale, ka.y * scale);
+      ctx.lineTo(kb.x * scale, kb.y * scale);
+      ctx.stroke();
+    }
+    p.keypoints.forEach((k, i) => {
+      if (!k.visible && !k.moved) return;
+      ctx.beginPath();
+      ctx.arc(k.x * scale, k.y * scale, k.moved ? 7 : 5, 0, Math.PI * 2);
+      ctx.fillStyle = k.moved ? "#ffd479" : (i < 5 ? "#ff64ff" : "#48d1ff");
+      ctx.fill();
+      ctx.strokeStyle = "#0a0c10";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "#7c5cff";
+    });
+  }
+  $("#poseEditorInfo").textContent =
+    `${CONTROL.persons.length} personnage(s) · ${CONTROL.persons.reduce((n, p) => n + p.keypoints.filter((k) => k.moved).length, 0)} point(s) déplacé(s) · image ${natural.w}×${natural.h} px`;
+}
+
+function canvasPoint(ev, canvas) {
+  const r = canvas.getBoundingClientRect();
+  const scale = Number(canvas.dataset.scale || 1);
+  return { x: (ev.clientX - r.left) / scale, y: (ev.clientY - r.top) / scale };
+}
+
+let poseDrag = null;
+let poseRenderTimer = null;
+
+function bindPoseEditor() {
+  const canvas = $("#poseCanvas");
+  if (!canvas || canvas.dataset.bound) return;
+  canvas.dataset.bound = "1";
+  canvas.addEventListener("pointerdown", (ev) => {
+    const pt = canvasPoint(ev, canvas);
+    let best = null, bestD = 18;
+    CONTROL.persons.forEach((p, pi) => p.keypoints.forEach((k, ki) => {
+      if (!k.visible && !k.moved) return;
+      const d = Math.hypot(k.x - pt.x, k.y - pt.y);
+      if (d < bestD) { bestD = d; best = { pi, ki }; }
+    }));
+    if (!best) return;
+    poseDrag = best;
+    if (canvas.setPointerCapture && ev.pointerId !== undefined) {
+      try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* non supporté */ }
+    }
+  });
+  canvas.addEventListener("pointermove", (ev) => {
+    if (!poseDrag) return;
+    const pt = canvasPoint(ev, canvas);
+    const k = CONTROL.persons[poseDrag.pi].keypoints[poseDrag.ki];
+    k.x = Math.round(Math.max(0, Math.min(CONTROL.width, pt.x)));
+    k.y = Math.round(Math.max(0, Math.min(CONTROL.height, pt.y)));
+    k.moved = true;
+    k.visible = true;
+    drawPoseEditor();
+  });
+  canvas.addEventListener("pointerup", async () => {
+    if (!poseDrag) return;
+    poseDrag = null;
+    clearTimeout(poseRenderTimer);
+    poseRenderTimer = setTimeout(applyPoseEdits, 150);
+  });
+  canvas.addEventListener("pointercancel", () => { poseDrag = null; });
+}
+
+async function applyPoseEdits() {
+  if (!CONTROL.persons.length) return;
+  setControlStatus("Mise à jour du squelette…");
+  try {
+    const r = await postJSON("/api/control/pose", {
+      persons: CONTROL.persons, width: CONTROL.width, height: CONTROL.height, kind: "pose",
+    });
+    CONTROL.id = r.control.id;
+    CONTROL.url = r.control.url + "?t=" + Date.now();
+    CONTROL.status = "Pose ajustée à la main — " + CONTROL.persons.length + " personnage(s).";
+    renderControl();
+  } catch (e) {
+    setControlStatus("⚠️ " + e.message, "warn");
+  }
+}
+
+$("#btnDetect").onclick = () => detectControl($("#controlType").value === "canny" ? "canny" : "pose");
+$("#controlType").onchange = (e) => {
+  const v = e.target.value;
+  if (!v) { clearControl(); return; }
+  CONTROL.type = v;
+  CONTROL.editor = v === "pose";
+  detectControl(v);
+};
+$("#controlStrength").oninput = (e) => ($("#controlStrengthVal").textContent = Number(e.target.value).toFixed(2));
+$("#strength").oninput = (e) => ($("#strengthVal").textContent = Number(e.target.value).toFixed(2));
+$("#controlSource").onchange = (e) => {
+  if (e.target.value === "file") $("#controlFile").click();
+};
+$("#controlFile").onchange = () => { if (CONTROL.type) detectControl(CONTROL.type); };
+$("#btnReference").onclick = () => $("#referencePose").click();
+$("#referencePose").onchange = async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  // squelette de référence : on l'utilise tel quel comme image de contrôle
+  const fd = new FormData();
+  fd.append("image", f);
+  fd.append("kind", "canny");
+  try {
+    const up = await api("/api/control/detect", { method: "POST", body: fd });
+    CONTROL.type = "pose";
+    CONTROL.id = up.control.id;
+    CONTROL.url = up.control.url;
+    CONTROL.width = up.control.width;
+    CONTROL.height = up.control.height;
+    CONTROL.persons = [];
+    CONTROL.detected = null;
+    CONTROL.editor = false;
+    CONTROL.sourceUrl = up.source.url;
+    CONTROL.status = "Squelette de référence importé : il sera utilisé comme contrôle de pose (utilisez un "
+      + "ControlNet Canny si c'est une simple silhouette).";
+    $("#controlType").value = "pose";
+    renderControl();
+  } catch (err) { alert(err.message); }
+};
+$("#btnPoseReset").onclick = () => {
+  if (!CONTROL.detected) return;
+  CONTROL.persons = JSON.parse(JSON.stringify(CONTROL.detected));
+  drawPoseEditor();
+  applyPoseEdits();
+};
+$("#btnPoseHide").onclick = () => {
+  CONTROL.editor = false;
+  $("#poseEditor").classList.add("hidden");
+};
+$("#btnControlClear").onclick = () => clearControl();
+
+function clearControl() {
+  CONTROL.type = ""; CONTROL.id = ""; CONTROL.url = ""; CONTROL.persons = [];
+  CONTROL.detected = null; CONTROL.sourceUrl = ""; CONTROL.status = ""; CONTROL.editor = false;
+  CONTROL.width = CONTROL.height = 0;
+  if ($("#controlType")) $("#controlType").value = "";
+  renderControl();
+  setControlStatus("Contrôle désactivé : la génération se fait librement à partir du prompt.");
+}
+
+bindPoseEditor();
 
 // ------------------------------------------------------------- boucle
 refreshStatus().then(() => { if (STATUS && STATUS.generation.running) pollGeneration(); });

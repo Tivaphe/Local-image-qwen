@@ -61,6 +61,75 @@
         <div id="refPreview" class="refs"></div>
       </div>
 
+      <div class="card" id="poseCard">
+        <div class="card-title">🧍 Personnages, pose et composition (ControlNet)</div>
+        <div id="controlUnsupported" class="notice hidden"></div>
+        <div id="controlBody">
+          <div class="grid2">
+            <label>Type de contrôle
+              <select id="controlType">
+                <option value="">Aucun</option>
+                <option value="pose">Pose des personnages (squelette)</option>
+                <option value="canny">Contours / composition (Canny)</option>
+              </select>
+            </label>
+            <label>Force du contrôle <span class="val" id="controlStrengthVal">0.90</span>
+              <input type="range" id="controlStrength" min="0" max="1.5" step="0.05" value="0.9">
+            </label>
+          </div>
+          <p class="hint" id="controlHint">Détectez automatiquement les personnages d'une photo, ajustez leur squelette,
+            puis lancez la génération : la pose est conservée pendant que le prompt change l'apparence, la tenue ou le décor.</p>
+
+          <div class="row wrap">
+            <label class="check" id="controlSourceWrap">Source
+              <select id="controlSource" style="width:auto">
+                <option value="ref">Image de référence (ajoutée plus haut)</option>
+                <option value="file">Autre fichier…</option>
+                <option value="result">Dernière image générée</option>
+              </select>
+            </label>
+            <input type="file" id="controlFile" accept="image/*" class="hidden">
+            <button id="btnDetect" class="primary">🔍 Détecter les personnages</button>
+            <button id="btnReference" class="ghost hidden">🖼️ Choisir un squelette de référence…</button>
+            <button id="btnControlClear" class="ghost">✖ Retirer le contrôle</button>
+          </div>
+          <input type="file" id="referencePose" accept="image/*" class="hidden">
+          <div id="controlMissing" class="notice hidden"></div>
+          <div id="controlStatus" class="small"></div>
+
+          <div id="poseEditor" class="hidden">
+            <div class="row">
+              <span class="small">Faites glisser les articulations pour ajuster la pose (les points déplacés passent en surbrillance).</span>
+              <span>
+                <button class="ghost" id="btnPoseReset">↺ Réinitialiser</button>
+                <button class="ghost" id="btnPoseHide">▾ Masquer l'éditeur</button>
+              </span>
+            </div>
+            <canvas id="poseCanvas" width="480" height="480"></canvas>
+            <div class="small" id="poseEditorInfo"></div>
+          </div>
+
+          <div class="grid2" id="controlPreviewWrap">
+            <div>
+              <div class="small">Image de contrôle envoyée au modèle</div>
+              <img id="controlPreview" class="control-preview" alt="">
+            </div>
+            <div>
+              <div class="small">Référence utilisée</div>
+              <img id="controlSourcePreview" class="control-preview" alt="">
+            </div>
+          </div>
+
+          <div class="grid2" id="controlInitWrap">
+            <label class="check"><input type="checkbox" id="useInit"> Repartir de la photo (img2img) : garde les couleurs,
+              l'identité et le décor, en suivant le prompt</label>
+            <label>Force img2img <span class="val" id="strengthVal">0.45</span>
+              <input type="range" id="strength" min="0.05" max="1" step="0.05" value="0.45">
+            </label>
+          </div>
+        </div>
+      </div>
+
       <div class="grid2" id="formatRow">
         <label>Format
           <select id="preset">
@@ -114,6 +183,7 @@
         <div class="placeholder">L'image apparaîtra ici</div>
       </div>
       <div id="resultMeta" class="small"></div>
+      <div id="resultControl" class="small"></div>
     </div>
   </div>
 </section>
@@ -139,7 +209,9 @@
 
   <div class="card">
     <div class="card-title">2. Modèles <span class="small" id="diskFree"></span></div>
-    <p class="hint">Choisissez la quantification puis cliquez sur <b>Tout télécharger</b> : les fichiers manquants
+    <p class="hint">La famille <b>SD 1.5 + ControlNet</b> ajoute le pilotage de la <b>pose des personnages</b> :
+      modèle de contrôle OpenPose + détecteur automatique de personnages.
+      Choisissez la quantification puis cliquez sur <b>Tout télécharger</b> : les fichiers manquants
       sont téléchargés à la suite, et le modèle devient actif. Tout fichier <code>.gguf</code>/<code>.safetensors</code>
       copié manuellement dans <code>models/&lt;modèle&gt;/&lt;catégorie&gt;/</code> apparaît aussi automatiquement
       (fine‑tunes, autres quantifications…), sélectionnable par bouton radio.</p>

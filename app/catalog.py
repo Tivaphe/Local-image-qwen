@@ -19,19 +19,22 @@ Références :
 HF = "https://huggingface.co"
 
 # Catégories de fichiers, dans l'ordre où elles apparaissent dans l'interface
-CATEGORIES = ("diffusion", "text_encoder", "vae", "vision", "lora")
-MODEL_EXTENSIONS = (".gguf", ".safetensors")
+CATEGORIES = ("diffusion", "text_encoder", "vae", "vision", "controlnet", "pose_detector", "lora")
+MODEL_EXTENSIONS = (".gguf", ".safetensors", ".onnx")   # .onnx : détecteur de pose (YOLOv8)
 
 
-def _f(repo: str, path: str, size_gb: float, label: str, recommended: bool = False) -> dict:
+def _f(repo: str, path: str, size_gb: float, label: str, recommended: bool = False,
+       dest: str = "", **extra) -> dict:
+    """Fiche catalogue : ``id`` = nom du fichier écrit sur le disque (``dest`` si fourni)."""
     return {
-        "id": path.split("/")[-1],
+        "id": dest or path.split("/")[-1],
         "label": f"{label} ({size_gb:g} Go)" + (" — recommandé" if recommended else ""),
         "url": f"{HF}/{repo}/resolve/main/{path}",
         "size_gb": size_gb,
         "recommended": recommended,
         "repo": repo,
         "path": path,
+        **extra,
     }
 
 
@@ -43,6 +46,12 @@ QWEN_IMAGE_21 = {
     "defaults": {"steps": 30, "cfg_scale": 6.0, "sampler": "euler", "width": 1024, "height": 1024},
     "edit_requires_vision": True,
     "edit_info": "Édition d'image : images de référence + instruction, avec l'encodeur de vision (mmproj) à télécharger.",
+    "supports_controlnet": False,
+    "bundled": False,
+    "uses_init_image": False,
+    "control_modes": [],
+    "control_reason": "Qwen‑Image‑2.1 est un modèle « DiT » : stable-diffusion.cpp ne gère ControlNet que pour les modèles UNet (SD 1.5 / SDXL). La famille « SD 1.5 + ControlNet » sert à piloter la pose.",
+    "required_selections": ["diffusion", "text_encoder", "vae"],
     "diffusion": [
         _f("leejet/Qwen-Image-2.1-GGUF", "qwen_image_2.1-Q2_K.gguf", 2.56, "Q2_K — très léger, qualité réduite"),
         _f("leejet/Qwen-Image-2.1-GGUF", "qwen_image_2.1-Q3_K.gguf", 3.27, "Q3_K — léger"),
@@ -82,6 +91,12 @@ FLUX2_KLEIN_4B = {
     "defaults": {"steps": 4, "cfg_scale": 1.0, "sampler": "euler", "width": 1024, "height": 1024},
     "edit_requires_vision": False,
     "edit_info": "Édition d'image : native (aucun fichier supplémentaire), les images de référence sont passées directement au modèle.",
+    "supports_controlnet": False,
+    "bundled": False,
+    "uses_init_image": False,
+    "control_modes": [],
+    "control_reason": "FLUX.2 klein est un modèle « DiT » : stable-diffusion.cpp ne gère ControlNet que pour les modèles UNet (SD 1.5 / SDXL). La famille « SD 1.5 + ControlNet » sert à piloter la pose.",
+    "required_selections": ["diffusion", "text_encoder", "vae"],
     "diffusion": [
         _f("unsloth/FLUX.2-klein-4B-GGUF", "flux-2-klein-4b-Q3_K_M.gguf", 2.12, "Q3_K_M — léger"),
         _f("unsloth/FLUX.2-klein-4B-GGUF", "flux-2-klein-4b-Q4_K_M.gguf", 2.6, "Q4_K_M"),
@@ -114,6 +129,12 @@ FLUX2_KLEIN_9B = {
     "defaults": {"steps": 4, "cfg_scale": 1.0, "sampler": "euler", "width": 1024, "height": 1024},
     "edit_requires_vision": False,
     "edit_info": "Édition d'image : native (aucun fichier supplémentaire), les images de référence sont passées directement au modèle.",
+    "supports_controlnet": False,
+    "bundled": False,
+    "uses_init_image": False,
+    "control_modes": [],
+    "control_reason": "FLUX.2 klein est un modèle « DiT » : stable-diffusion.cpp ne gère ControlNet que pour les modèles UNet (SD 1.5 / SDXL). La famille « SD 1.5 + ControlNet » sert à piloter la pose.",
+    "required_selections": ["diffusion", "text_encoder", "vae"],
     "diffusion": [
         _f("unsloth/FLUX.2-klein-9B-GGUF", "flux-2-klein-9b-Q3_K_M.gguf", 4.77, "Q3_K_M — léger"),
         _f("unsloth/FLUX.2-klein-9B-GGUF", "flux-2-klein-9b-Q4_K_M.gguf", 5.91, "Q4_K_M"),
@@ -138,7 +159,63 @@ FLUX2_KLEIN_9B = {
     },
 }
 
-FAMILIES = {f["id"]: f for f in (QWEN_IMAGE_21, FLUX2_KLEIN_4B, FLUX2_KLEIN_9B)}
+
+# ---------------------------------------------- SD 1.5 + ControlNet (pose)
+# stable-diffusion.cpp ne prend en charge ControlNet que pour les architectures UNet
+# (SD 1.5 / SDXL). C'est donc la seule famille de l'application qui permet d'imposer
+# ou d'ajuster la pose des personnages, y compris en repartant d'une photo (img2img).
+CONTROLNET_MODELS = [
+    _f("lllyasviel/control_v11p_sd15_openpose", "diffusion_pytorch_model.fp16.safetensors", 0.72,
+       "OpenPose — squelette des personnages", recommended=True,
+       dest="control_v11p_sd15_openpose.safetensors", mode="pose"),
+    _f("lllyasviel/control_v11p_sd15_canny", "diffusion_pytorch_model.fp16.safetensors", 0.72,
+       "Canny — contours et composition", recommended=True,
+       dest="control_v11p_sd15_canny.safetensors", mode="canny"),
+]
+
+POSE_MODELS = [
+    _f("Xenova/yolov8n-pose", "onnx/model.onnx", 0.014,
+       "Détecteur de personnages et de pose (YOLOv8n-pose, ONNX)", recommended=True,
+       dest="yolov8n-pose.onnx"),
+]
+
+SD15_CONTROL = {
+    "id": "sd15_control",
+    "name": "SD 1.5 + ControlNet (pose)",
+    "description": "Seul modèle du moteur à accepter ControlNet : imposez ou ajustez la pose des personnages, "
+                   "à partir d'une photo (pose détectée automatiquement, retouchable) ou d'un squelette de référence. "
+                   "Qualité plus modeste que Qwen/FLUX.2 : ~25 étapes, CFG 7.",
+    "defaults": {"steps": 25, "cfg_scale": 7.0, "sampler": "euler_a", "width": 512, "height": 512},
+    "edit_requires_vision": False,
+    "edit_info": "Édition d'image : repartez de la photo (img2img) et gardez la pose détectée — le personnage garde "
+                 "sa posture pendant que le prompt change l'apparence, la tenue ou le décor.",
+    "supports_controlnet": True,
+    "control_reason": "",
+    "control_modes": ["pose", "canny"],
+    "uses_init_image": True,
+    "bundled": True,
+    "required_selections": ["diffusion"],
+    "diffusion": [
+        _f("stable-diffusion-v1-5/stable-diffusion-v1-5", "v1-5-pruned-emaonly.safetensors", 4.27,
+           "SD 1.5 — checkpoint complet (UNet + CLIP + VAE)", recommended=True),
+    ],
+    "text_encoder": [],
+    "vision": [],
+    "vae": [],
+    "controlnet": CONTROLNET_MODELS,
+    "pose_detector": POSE_MODELS,
+    "pack": {
+        "diffusion": "v1-5-pruned-emaonly.safetensors",
+        "text_encoder": "",
+        "vae": "",
+        "vision": "",
+        "controlnet": "control_v11p_sd15_openpose.safetensors",
+        "pose_detector": "yolov8n-pose.onnx",
+        "hint": "Pack complet : SD 1.5 + ControlNet OpenPose + détecteur de pose automatique.",
+    },
+}
+
+FAMILIES = {f["id"]: f for f in (QWEN_IMAGE_21, FLUX2_KLEIN_4B, FLUX2_KLEIN_9B, SD15_CONTROL)}
 DEFAULT_FAMILY = "qwen_image_2.1"
 
 
@@ -172,9 +249,12 @@ def install_plan(family: str, diffusion_id: str = "", text_encoder_id: str = "",
         "text_encoder": text_encoder_id or pack.get("text_encoder", ""),
         "vae": pack.get("vae", ""),
         "vision": pack.get("vision", "") if (include_vision and fam.get("edit_requires_vision")) else "",
+        # ControlNet : le modèle de contrôle et le détecteur de pose font partie du pack
+        "controlnet": pack.get("controlnet", "") if fam.get("controlnet") else "",
+        "pose_detector": pack.get("pose_detector", "") if fam.get("controlnet") else "",
     }
     plan: list[dict] = []
-    for cat in ("diffusion", "text_encoder", "vae", "vision"):
+    for cat in ("diffusion", "text_encoder", "vae", "vision", "controlnet", "pose_detector"):
         fid = wanted.get(cat, "")
         if not fid:
             continue
@@ -185,6 +265,42 @@ def install_plan(family: str, diffusion_id: str = "", text_encoder_id: str = "",
         if e:
             plan.append({**e, "category": cat})
     return plan
+
+
+def controlnet_files(families: dict | None = None) -> list[dict]:
+    """Tous les modèles ControlNet du catalogue (dédupliqués par nom de fichier)."""
+    seen: dict[str, dict] = {}
+    for fam in (families or FAMILIES).values():
+        for e in fam.get("controlnet", []):
+            seen.setdefault(e["id"], e)
+    return list(seen.values())
+
+
+def pose_models() -> list[dict]:
+    seen: dict[str, dict] = {}
+    for fam in FAMILIES.values():
+        for e in fam.get("pose_detector", []):
+            seen.setdefault(e["id"], e)
+    return list(seen.values())
+
+
+def family_for_control(kind: str = "") -> str:
+    """Famille à utiliser pour ControlNet (celle qui gère ``kind`` : « pose » ou « canny »)."""
+    for fid, fam in FAMILIES.items():
+        if not fam.get("controlnet"):
+            continue
+        if not kind or kind in (fam.get("control_modes") or []):
+            return fid
+    return DEFAULT_FAMILY
+
+
+def category_of_file(family: str, name: str) -> str | None:
+    """Catégorie d'un fichier présent sur le disque (par son nom)."""
+    fam = FAMILIES.get(family) or {}
+    for cat in CATEGORIES:
+        if any(e["id"] == name for e in fam.get(cat, []) if isinstance(e, dict)):
+            return cat
+    return None
 
 
 def pack_total_gb(family: str, diffusion_id: str = "", text_encoder_id: str = "", include_vision: bool = True) -> float:

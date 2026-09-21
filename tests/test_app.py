@@ -12,18 +12,27 @@ from app.paths import model_dir
 
 
 # ------------------------------------------------------------------ catalogue
-def test_trois_familles_avec_pack_complet():
-    assert set(catalog.FAMILIES) == {"qwen_image_2.1", "flux2_klein_9b", "flux2_klein_4b"}
+def test_quatre_familles_avec_pack_complet():
+    assert set(catalog.FAMILIES) == {"qwen_image_2.1", "flux2_klein_9b", "flux2_klein_4b", "sd15_control"}
     for fam in catalog.FAMILIES.values():
         pack = fam["pack"]
         # génération toujours complète
         for cat in ("diffusion", "text_encoder", "vae"):
-            assert catalog.entry(fam["id"], cat, pack[cat]), f"{fam['id']}/{cat} introuvable"
+            if not fam["bundled"]:                      # SD 1.5 : un seul fichier (UNet + CLIP + VAE)
+                assert catalog.entry(fam["id"], cat, pack[cat]), f"{fam['id']}/{cat} introuvable"
+        assert catalog.entry(fam["id"], "diffusion", pack["diffusion"])
         # édition : mmproj obligatoire pour Qwen, natif pour FLUX.2 klein
         if fam["edit_requires_vision"]:
             assert catalog.entry(fam["id"], "vision", pack["vision"])
         else:
             assert pack["vision"] == ""
+        # ControlNet : uniquement sur la famille SD 1.5 (UNet), avec une explication ailleurs
+        if fam["supports_controlnet"]:
+            assert fam["control_modes"] and fam["control_reason"] == ""
+            for cat in ("controlnet", "pose_detector"):
+                assert catalog.entry(fam["id"], cat, pack[cat]), f"{fam['id']}/{cat} introuvable"
+        else:
+            assert fam["control_reason"]
         assert fam["edit_info"]
 
 
@@ -111,7 +120,7 @@ def client(sandbox, monkeypatch):
 
 def test_status_expose_packs_et_progression(client):
     data = client.get("/api/status").json()
-    assert len(data["families"]) == 3
+    assert len(data["families"]) == 4
     qwen = next(f for f in data["families"] if f["id"] == "qwen_image_2.1")
     assert qwen["pack"]["vision"].startswith("mmproj-")
     assert qwen["pack_total_gb"] > 5

@@ -12,15 +12,20 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import backend, config, downloads, generator
+from . import backend, config, downloads, generator, pose
 from .catalog import (
     CATEGORIES,
     DEFAULT_FAMILY,
     FAMILIES,
     MODEL_EXTENSIONS,
+    controlnet_files,
+    family_for_control,
     pack_total_gb,
+    pose_models,
 )
-from .paths import MODELS_DIR, OUTPUTS_DIR, STATIC_DIR, UPLOADS_DIR, ensure_dirs, model_dir
+from .paths import CONTROLS_DIR, MODELS_DIR, OUTPUTS_DIR, STATIC_DIR, UPLOADS_DIR, ensure_dirs, model_dir
+from .catalog import entry as catalog_entry
+from . import paths as _paths
 
 ensure_dirs()
 app = FastAPI(title="Local Image Qwen", docs_url=None, redoc_url=None)
@@ -29,6 +34,10 @@ app.mount("/outputs", StaticFiles(directory=str(OUTPUTS_DIR)), name="outputs")
 app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 _ASSET_RE = re.compile(r'(?P<url>/static/(?:app\.js|style\.css))(?P<q>["\'])')
+
+
+def required_selections(family: str) -> list[str]:
+    return generator.required_selections(family)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -74,16 +83,18 @@ def status():
         config.save(cfg)
     fam = cfg["family"]
     sel = cfg["selections"][fam]
-    ready = all(sel.get(k) for k in ("diffusion", "text_encoder", "vae"))
+    ready = all(sel.get(k) for k in required_selections(fam))
     families_status = {
         f: {
-            "ready": all(cfg["selections"][f].get(k) for k in ("diffusion", "text_encoder", "vae")),
+            "ready": all(cfg["selections"][f].get(k) for k in required_selections(f)),
             "edit_ready": (not FAMILIES[f]["edit_requires_vision"]) or bool(cfg["selections"][f].get("vision")),
+            "control_ready": bool(FAMILIES[f].get("supports_controlnet")) and bool(local[f].get("controlnet")),
             "installed_gb": _installed_gb(local[f]),
             "file_count": sum(len(v) for v in local[f].values()),
         }
         for f in FAMILIES
     }
+    pose_detectors = local.get(family_for_control(), {}).get("pose_detector", [])
     families = []
     for f in FAMILIES:
         data = dict(FAMILIES[f])
@@ -100,6 +111,16 @@ def status():
         "edit_ready": families_status[fam]["edit_ready"],
         "samplers": generator.SAMPLERS,
         "disk_free_gb": round(shutil.disk_usage(str(MODELS_DIR)).free / 1e9, 1),
+        "control": {
+            "types": list(generator.CONTROL_TYPES),
+            "pose": pose.available(),
+            "pose_models": pose_models(),
+            "pose_model_present": bool(pose_detectors),
+            "controlnets": controlnet_files(),
+            "control_family": family_for_control(),
+            "selected_controlnet": cfg["selections"].get(family_for_control(), {}).get("controlnet", ""),
+            "selected_pose_model": cfg["selections"].get(family_for_control(), {}).get("pose_detector", ""),
+        },
         "paths": {"models": str(MODELS_DIR), "outputs": str(OUTPUTS_DIR)},
         "jobs": downloads.list_jobs(),
         "generation": generator.state(),
@@ -213,6 +234,132 @@ def delete_model(family: str, category: str, name: str):
     return {"ok": True}
 
 
+# ------------------------------------------------------- personnages / contrôle
+def _safe_upload(rel: str) -> Path:
+    """Chemin d'un fichier déjà téléversé (protège contre les remontées de dossier)."""
+    rel = (rel or "").replace("\\", "/").lstrip("/")
+    if not rel or ".." in rel.split("/"):
+        raise HTTPException(400, "fichier invalide")
+    p = (UPLOADS_DIR / rel).resolve()
+    if UPLOADS_DIR.resolve() not in p.parents:
+        raise HTTPException(400, "fichier invalide")
+    if not p.exists():
+        raise HTTPException(404, f"fichier introuvable : {rel}")
+    return p
+
+
+async def _save_upload(f: UploadFile) -> Path:
+    ext = Path(f.filename or "image.png").suffix.lower() or ".png"
+    dest = UPLOADS_DIR / f"{uuid.uuid4().hex}{ext}"
+    dest.write_bytes(await f.read())
+    return dest
+
+
+def _pose_model_path() -> Path | None:
+    """Détecteur de pose choisi, sinon le premier présent sur le disque."""
+    cfg = config.load()
+    fam = family_for_control()
+    chosen = cfg["selections"].get(fam, {}).get("pose_detector", "")
+    for candidate in (chosen, *[m["id"] for m in pose_models()]):
+        p = paths_controlnet(candidate)
+        if p is not None:
+            return p
+    return None
+
+
+def paths_controlnet(name: str):
+    return _paths.controlnet_path(name)
+
+
+def _control_url(name: str) -> str:
+    return f"/uploads/controls/{name}"
+
+
+class PoseIn(BaseModel):
+    persons: list[dict]
+    width: int
+    height: int
+    kind: str = "pose"
+
+
+@app.post("/api/control/detect")
+async def control_detect(
+    image: UploadFile = File(...),
+    kind: str = Form("pose"),
+    background: str = Form("black"),
+    low: int = Form(100),
+    high: int = Form(200),
+):
+    """Détecte automatiquement les personnages (pose) ou calcule les contours de l'image."""
+    if kind not in generator.CONTROL_TYPES:
+        raise HTTPException(400, f"type de contrôle inconnu : {kind}")
+    src = await _save_upload(image)
+    try:
+        if kind == "canny":
+            edges = pose.canny_control(src, low, high)
+            name = f"{uuid.uuid4().hex}-canny.png"
+            pose.save_image(edges, CONTROLS_DIR / name)
+            height, width = edges.shape[:2]
+            return {
+                "ok": True, "kind": "canny", "count": 1, "persons": [],
+                "control": {"id": f"controls/{name}", "url": _control_url(name), "width": width, "height": height},
+                "source": {"id": src.name, "url": f"/uploads/{src.name}"},
+                "image": {"width": width, "height": height},
+                "message": "Contours calculés. Ajustez la force du contrôle puis lancez la génération.",
+            }
+
+        model = _pose_model_path()
+        if model is None:
+            raise HTTPException(
+                400,
+                "Détecteur de personnages absent : téléchargez « yolov8n-pose.onnx » (~13 Mo) dans l'onglet Modèles "
+                "(famille « SD 1.5 + ControlNet »), puis relancez la détection.",
+            )
+        detector = pose.PoseDetector(model)
+        result = detector.detect(src)
+        persons = result["persons"]
+        if not persons:
+            raise HTTPException(
+                400,
+                "Aucun personnage détecté sur cette image. Essayez une photo où les personnes sont plus grandes ou "
+                "mieux éclairées, ou importez un squelette de référence à la place.",
+            )
+        base = pose.read_image(src) if background == "image" else None
+        skeleton = pose.render_skeleton(persons, result["width"], result["height"], background=base)
+        name = f"{uuid.uuid4().hex}-pose.png"
+        pose.save_image(skeleton, CONTROLS_DIR / name)
+        return {
+            "ok": True, "kind": "pose", "count": len(persons), "persons": persons,
+            "backend": result.get("backend", ""),
+            "control": {"id": f"controls/{name}", "url": _control_url(name),
+                        "width": result["width"], "height": result["height"]},
+            "source": {"id": src.name, "url": f"/uploads/{src.name}"},
+            "image": {"width": result["width"], "height": result["height"]},
+            "message": f"{len(persons)} personnage(s) détecté(s) — vous pouvez ajuster le squelette dans l'éditeur.",
+        }
+    except pose.PoseError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/control/pose")
+def control_pose(p: PoseIn):
+    """Rend un squelette (ou une silhouette) à partir des points ajustés dans l'éditeur."""
+    if not p.persons:
+        raise HTTPException(400, "aucun squelette à dessiner")
+    if p.width < 64 or p.height < 64:
+        raise HTTPException(400, "dimensions invalides")
+    kind = "silhouette" if p.kind == "silhouette" else "pose"
+    try:
+        img = pose.render_skeleton(p.persons, int(p.width), int(p.height), kind=kind)
+    except pose.PoseError as e:
+        raise HTTPException(400, str(e))
+    name = f"{uuid.uuid4().hex}-{kind}-edit.png"
+    pose.save_image(img, CONTROLS_DIR / name)
+    return {"ok": True, "kind": kind,
+            "control": {"id": f"controls/{name}", "url": _control_url(name),
+                        "width": int(p.width), "height": int(p.height)}}
+
+
 # -------------------------------------------------------------- generation
 @app.post("/api/generate")
 async def generate(
@@ -224,7 +371,16 @@ async def generate(
     cfg_scale: float = Form(6.0),
     sampler: str = Form("euler"),
     seed: int = Form(-1),
+    mode: str = Form("generate"),
+    control_type: str = Form(""),
+    control_id: str = Form(""),
+    control_strength: float = Form(0.9),
+    control_net: str = Form(""),
+    use_init: bool = Form(False),
+    strength: float = Form(0.45),
+    init_id: str = Form(""),
     ref_images: list[UploadFile] = File(default=[]),
+    init_image: UploadFile | None = File(default=None),
 ):
     if not prompt.strip():
         raise HTTPException(400, "Le prompt est vide.")
@@ -233,13 +389,40 @@ async def generate(
     for f in ref_images:
         if not f.filename:
             continue
-        ext = Path(f.filename).suffix.lower() or ".png"
-        dest = UPLOADS_DIR / f"{uuid.uuid4().hex}{ext}"
-        dest.write_bytes(await f.read())
-        refs.append(str(dest))
+        refs.append(str(await _save_upload(f)))
+
+    # ControlNet : image de contrôle déjà préparée (pose détectée / contours) recadrée
+    # exactement à la taille de génération
+    control_image = ""
+    if control_type:
+        if control_type not in generator.CONTROL_TYPES:
+            raise HTTPException(400, f"type de contrôle inconnu : {control_type}")
+        if not control_id:
+            raise HTTPException(400, "ControlNet activé mais aucune image de contrôle : lancez d'abord "
+                                     "« Détecter les personnages » ou « Calculer les contours ».")
+        src = _safe_upload(control_id)
+        dest = CONTROLS_DIR / f"{Path(control_id).stem}-{width}x{height}.png"
+        try:
+            pose.prepare_control(src, dest, width, height, control_type)
+        except pose.PoseError as e:
+            raise HTTPException(400, str(e))
+        control_image = str(dest)
+
+    # img2img : repartir d'une photo (référence téléversée ou fichier déjà présent)
+    init_path = ""
+    if init_image is not None and init_image.filename:
+        init_path = str(await _save_upload(init_image))
+    elif init_id:
+        init_path = str(_safe_upload(init_id))
+    elif use_init and refs:
+        init_path = refs[0]
+
     params = {
         "prompt": prompt, "negative_prompt": negative_prompt, "width": width, "height": height,
         "steps": steps, "cfg_scale": cfg_scale, "sampler": sampler, "seed": seed, "ref_images": refs,
+        "mode": mode, "control_type": control_type, "control_image": control_image,
+        "control_strength": control_strength, "control_net": control_net,
+        "init_image": init_path, "strength": strength,
     }
     cfg = config.load()
     config.save({k: params[k] for k in ("width", "height", "steps", "cfg_scale", "sampler", "negative_prompt")})
