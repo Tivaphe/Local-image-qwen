@@ -85,7 +85,7 @@ BUILD_ORDER = ["hips", "spine", "chest", "neck", "head", "head_top",
 
 # Longueurs de référence de chaque segment (mètres) — valeurs du tableau de l'interface.
 BASE_LENGTHS = {
-    "spine": 0.16, "chest": 0.20, "neck": 0.10, "head": 0.13, "head_top": 0.10,
+    "spine": 0.16, "chest": 0.20, "neck": 0.115, "head": 0.13, "head_top": 0.10,
     "shoulder_l": 0.19, "elbow_l": 0.28, "wrist_l": 0.25, "hand_l": 0.10,
     "shoulder_r": 0.19, "elbow_r": 0.28, "wrist_r": 0.25, "hand_r": 0.10,
     "hip_l": 0.11, "knee_l": 0.44, "ankle_l": 0.42, "toe_l": 0.17, "heel_l": 0.08,
@@ -93,7 +93,7 @@ BASE_LENGTHS = {
 }
 # Épaisseurs de référence (diamètre au milieu du segment, mètres).
 BASE_THICK = {
-    "spine": 0.262, "chest": 0.315, "neck": 0.168, "head": 0.176, "head_top": 0.155,
+    "spine": 0.262, "chest": 0.315, "neck": 0.116, "head": 0.172, "head_top": 0.150,
     "shoulder_l": 0.108, "elbow_l": 0.110, "wrist_l": 0.088, "hand_l": 0.075,
     "shoulder_r": 0.108, "elbow_r": 0.110, "wrist_r": 0.088, "hand_r": 0.075,
     "hip_l": 0.180, "knee_l": 0.150, "ankle_l": 0.102, "toe_l": 0.080, "heel_l": 0.074,
@@ -110,18 +110,21 @@ BUILDS = MORPHOLOGIES                     # ancien nom conservé
 
 # Tronc : coupes elliptiques le long de la colonne (largeur/profondeur en mètres)
 TORSO_PROFILE = [
-    {"at": 0.00, "width": 0.170, "depth": 0.165},
-    {"at": 0.16, "width": 0.190, "depth": 0.198},
-    {"at": 0.45, "width": 0.158, "depth": 0.172},
-    {"at": 0.70, "width": 0.245, "depth": 0.200},
-    {"at": 0.88, "width": 0.215, "depth": 0.195},
-    {"at": 1.00, "width": 0.145, "depth": 0.145},
+    {"at": -0.14, "width": 0.158, "depth": 0.168},   # entrejambe
+    {"at": 0.00, "width": 0.180, "depth": 0.175},    # sous le bassin
+    {"at": 0.16, "width": 0.205, "depth": 0.205},    # bassin / hanches
+    {"at": 0.45, "width": 0.166, "depth": 0.178},    # taille
+    {"at": 0.70, "width": 0.238, "depth": 0.196},    # bas des côtes
+    {"at": 0.86, "width": 0.302, "depth": 0.202},    # haut du thorax
+    {"at": 0.94, "width": 0.330, "depth": 0.192},    # épaules
+    {"at": 1.00, "width": 0.150, "depth": 0.150},    # base du cou
 ]
 TORSO_BUMPS = [
-    {"centre": 0.16, "sigma": 0.15, "scale": 1.05},
-    {"centre": 0.90, "sigma": 0.10, "scale": 0.93},
+    {"centre": 0.16, "sigma": 0.14, "scale": 1.02},   # hanches
+    {"centre": 0.93, "sigma": 0.09, "scale": 0.99},   # épaules
 ]
-TORSO_SLICES = 13
+TORSO_SLICES = 19
+TORSO_BAS = -0.12                 # le tronc descend jusqu'à l'entrejambe
 
 # ControlNet / OpenPose : 18 points, 17 membres, couleurs canoniques
 OPENPOSE_18 = ["nose", "neck", "shoulder_r", "elbow_r", "wrist_r", "shoulder_l", "elbow_l", "wrist_l",
@@ -169,6 +172,57 @@ def prepare(payload: dict, width: int, height: int) -> tuple[dict, dict, dict]:
 def _norm(v):
     n = math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
     return (v[0] / n, v[1] / n, v[2] / n) if n > 1e-9 else (0.0, 0.0, 0.0)
+
+
+# Galbe de chaque segment (facteur du rayon de référence, 0 = parent, 1 = extrémité).
+# Chaque profil est normalisé : l'épaisseur réglée reste le diamètre MOYEN du segment.
+LIMB_PROFILE = {
+    "neck": [[0, 1.04], [1, 0.88]],
+    "shoulder_l": [[0, 0.98], [1, 0.9]], "shoulder_r": [[0, 0.98], [1, 0.9]],
+    "elbow_l": [[0, 0.62], [0.14, 1.34], [0.42, 1.26], [0.72, 1.0], [1, 0.72]],
+    "elbow_r": [[0, 0.62], [0.14, 1.34], [0.42, 1.26], [0.72, 1.0], [1, 0.72]],
+    "wrist_l": [[0, 0.7], [0.18, 1.18], [0.5, 1.06], [0.85, 0.7], [1, 0.56]],
+    "wrist_r": [[0, 0.7], [0.18, 1.18], [0.5, 1.06], [0.85, 0.7], [1, 0.56]],
+    "hand_l": [[0, 0.9], [0.35, 1.06], [0.7, 0.94], [1, 0.6]],
+    "hand_r": [[0, 0.9], [0.35, 1.06], [0.7, 0.94], [1, 0.6]],
+    "knee_l": [[0, 0.7], [0.14, 1.24], [0.46, 1.16], [0.78, 0.9], [1, 0.66]],
+    "knee_r": [[0, 0.7], [0.14, 1.24], [0.46, 1.16], [0.78, 0.9], [1, 0.66]],
+    "ankle_l": [[0, 0.72], [0.22, 1.22], [0.5, 1.04], [0.8, 0.68], [1, 0.5]],
+    "ankle_r": [[0, 0.72], [0.22, 1.22], [0.5, 1.04], [0.8, 0.68], [1, 0.5]],
+    "toe_l": [[0, 1.0], [0.6, 0.94], [1, 0.78]], "toe_r": [[0, 1.0], [0.6, 0.94], [1, 0.78]],
+    "heel_l": [[0, 1.0], [1, 0.88]], "heel_r": [[0, 1.0], [1, 0.88]],
+}
+for _nom, _profil in LIMB_PROFILE.items():
+    _aire, _span = 0.0, 0.0
+    for _i in range(len(_profil) - 1):
+        _d = _profil[_i + 1][0] - _profil[_i][0]
+        _aire += (_profil[_i][1] + _profil[_i + 1][1]) / 2 * _d
+        _span += _d
+    _moyenne = (_aire / _span) if _span > 0 else 1.0
+    if _moyenne > 0:
+        for _point in _profil:
+            _point[1] /= _moyenne
+
+
+def profile_at(child: str, u: float) -> float:
+    """Facteur de galbe d'un segment à la fraction u (0 = parent, 1 = extrémité)."""
+    profil = LIMB_PROFILE.get(child)
+    if not profil:
+        return 1.0
+    x = max(0.0, min(1.0, u))
+    for i in range(len(profil) - 1):
+        if profil[i][0] <= x <= profil[i + 1][0]:
+            d = profil[i + 1][0] - profil[i][0] or 1.0
+            t = (x - profil[i][0]) / d
+            return profil[i][1] + (profil[i + 1][1] - profil[i][1]) * t
+    return profil[-1][1]
+
+
+# Éclairage de la peau : lumière de haut-gauche, légèrement devant le personnage.
+SKIN = (152, 176, 214)                 # albédo BGR (peau claire, mat)
+SKIN_CHAUD = (104, 128, 226)           # liseré chaud (lumière qui traverse la peau)
+LIGHT = (0.38, -0.82, -0.42)           # x = droite, y = haut (négatif dans l'image), z = avant
+SKIN_AMBIENT, SKIN_DIFFUSE, SKIN_SPEC, SKIN_SHIN = 0.52, 0.56, 0.22, 26
 
 
 def morphed_dimensions(morphology: str = "neutre") -> tuple[dict, dict]:
@@ -387,23 +441,206 @@ def validate(payload: dict) -> tuple[dict, dict, dict]:
 
 
 # ------------------------------------------------------------------- dessin
-def _chain_point(pose, chain, weights, f):
-    """Point du tronc à la fraction f (0 = bassin, 1 = cou), et direction de la colonne."""
-    total = sum(weights) or 1.0
+def _view(camera: dict) -> dict:
+    """Repère de vue : matrice de rotation et axe caméra (vers l'objectif)."""
+    r = rotation(float(camera.get("yaw", 0.42)), float(camera.get("pitch", 0.12)))
+    return {"r": r, "eye": (r[2][0], r[2][1], r[2][2])}
+
+
+def _skin_bgr(n, eye) -> tuple[int, int, int]:
+    """Couleur de peau pour une normale unitaire : Lambert + reflet + liseré chaud."""
+    diffuse = max(0.0, n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2])
+    h = (LIGHT[0] + eye[0], LIGHT[1] + eye[1], LIGHT[2] + eye[2])
+    hl = math.sqrt(h[0] ** 2 + h[1] ** 2 + h[2] ** 2) or 1.0
+    nh = max(0.0, (n[0] * h[0] + n[1] * h[1] + n[2] * h[2]) / hl)
+    spec = (nh ** SKIN_SHIN) * SKIN_SPEC
+    face = min(1.0, abs(n[0] * eye[0] + n[1] * eye[1] + n[2] * eye[2]))
+    bord = (1.0 - face) ** 2.2
+    sss = bord * 0.38
+    k = SKIN_AMBIENT + SKIN_DIFFUSE * diffuse
+    return tuple(int(min(255.0, max(0.0, SKIN[i] * k + SKIN_CHAUD[i] * sss + 255 * spec)))
+                 for i in range(3))
+
+
+def _limb_frame(a3, b3, eye):
+    """Repère d'ombrage d'un segment : axe, normale écran et axe caméra."""
+    w = _norm((b3[0] - a3[0], b3[1] - a3[1], b3[2] - a3[2]))
+    u = _norm((w[1] * eye[2] - w[2] * eye[1], w[2] * eye[0] - w[0] * eye[2], w[0] * eye[1] - w[1] * eye[0]))
+    if _norm(u) == (0.0, 0.0, 0.0):
+        u = (1.0, 0.0, 0.0)
+    z = _norm((u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]))
+    if z[0] * eye[0] + z[1] * eye[1] + z[2] * eye[2] < 0:
+        z = (-z[0], -z[1], -z[2])
+    return w, u, z
+
+
+def _limb_mask(p0, p1, profil, mean_r, camera, shape, points: int = 20):
+    """Masque du segment (silhouette musclée) + paramètres par pixel (u, t)."""
+    import cv2
+    import numpy as np
+
+    dx, dy = p1["x"] - p0["x"], p1["y"] - p0["y"]
+    long = max(1e-6, math.hypot(dx, dy))
+    nx, ny = -dy / long, dx / long
+    gauche, droite = [], []
+    for i in range(points + 1):
+        u = i / points
+        cx, cy = p0["x"] + dx * u, p0["y"] + dy * u
+        echelle = p0["scale"] + (p1["scale"] - p0["scale"]) * u
+        r = max(1.2, mean_r * _profil_valeur(profil, u) * echelle)
+        gauche.append((cx + nx * r, cy + ny * r))
+        droite.append((cx - nx * r, cy - ny * r))
+    poly = np.array([[int(round(x)), int(round(y))] for x, y in droite + list(reversed(gauche))], dtype="int32")
+    mask = np.zeros(shape, dtype="uint8")
+    cv2.fillPoly(mask, [poly], 255, cv2.LINE_AA)
+    # bouts arrondis (sphères aux extrémités), comme les capsules du navigateur
+    r0 = max(1, int(round(mean_r * _profil_valeur(profil, 0.0) * p0["scale"])))
+    r1 = max(1, int(round(mean_r * _profil_valeur(profil, 1.0) * p1["scale"])))
+    cv2.circle(mask, (int(round(p0["x"])), int(round(p0["y"]))), r0, 255, -1, cv2.LINE_AA)
+    cv2.circle(mask, (int(round(p1["x"])), int(round(p1["y"]))), r1, 255, -1, cv2.LINE_AA)
+    return mask, dx, dy, long, nx, ny
+
+
+def _profil_valeur(profil, u: float) -> float:
+    """Valeur d'un profil [(u, facteur), …] (même interpolation que le navigateur)."""
+    if not profil:
+        return 1.0
+    x = max(profil[0][0], min(profil[-1][0], u))
+    us = [pt[0] for pt in profil]
+    fs = [pt[1] for pt in profil]
+    for i in range(len(profil) - 1):
+        if us[i] <= x <= us[i + 1]:
+            d = us[i + 1] - us[i]
+            t = 0.0 if d <= 0 else (x - us[i]) / d
+            return fs[i] + (fs[i + 1] - fs[i]) * t
+    return fs[-1]
+
+
+def _draw_limb(canvas, p0, p1, profil, mean_r, a3, b3, camera, mode, fill=None) -> None:
+    """Dessine un segment de chair : silhouette musclée, peau ombrée (vectorisé)."""
+    import numpy as np
+
+    view = _view(camera)
+    mask, dx, dy, long, nx, ny = _limb_mask(p0, p1, profil, mean_r, camera, canvas.shape[:2])
+    ys, xs = np.nonzero(mask)
+    if not len(xs):
+        return
+    alpha = (mask[ys, xs].astype("float64") / 255.0)[:, None]
+    if mode == "silhouette":
+        canvas[ys, xs] = np.clip(canvas[ys, xs] * (1 - alpha) + 255 * alpha, 0, 255).astype("uint8")
+        return
+    if mode == "depth":
+        g = float(fill if fill is not None else 128)
+        canvas[ys, xs] = np.clip(canvas[ys, xs] * (1 - alpha) + g * alpha, 0, 255).astype("uint8")
+        return
+    w, u_axe, z_axe = _limb_frame(a3, b3, view["eye"])
+    px = (xs - p0["x"]).astype("float64")
+    py = (ys - p0["y"]).astype("float64")
+    u = np.clip((px * dx + py * dy) / (long * long), 0.0, 1.0)
+    travers = px * nx + py * ny
+    rayons = mean_r * np.interp(u, [pt[0] for pt in profil], [pt[1] for pt in profil]) * (
+        p0["scale"] + (p1["scale"] - p0["scale"]) * u)
+    t = np.clip(travers / np.maximum(1e-6, rayons), -1.0, 1.0)
+    theta = math.pi * (1.0 - t) / 2.0
+    cos_t, sin_t = np.cos(theta), np.sin(theta)
+    n0 = u_axe[0] * cos_t + z_axe[0] * sin_t
+    n1 = u_axe[1] * cos_t + z_axe[1] * sin_t
+    n2 = u_axe[2] * cos_t + z_axe[2] * sin_t
+    eye = view["eye"]
+    diffuse = np.clip(n0 * LIGHT[0] + n1 * LIGHT[1] + n2 * LIGHT[2], 0, None)
+    hx, hy, hz = LIGHT[0] + eye[0], LIGHT[1] + eye[1], LIGHT[2] + eye[2]
+    hl = math.sqrt(hx * hx + hy * hy + hz * hz) or 1.0
+    nh = np.clip((n0 * hx + n1 * hy + n2 * hz) / hl, 0, None)
+    spec = (nh ** SKIN_SHIN) * SKIN_SPEC
+    face = np.abs(n0 * eye[0] + n1 * eye[1] + n2 * eye[2])
+    sss = ((1.0 - face) ** 2.2) * 0.38
+    k = SKIN_AMBIENT + SKIN_DIFFUSE * diffuse
+    couleurs = np.empty((len(xs), 3), dtype="float64")
+    for i in range(3):
+        couleurs[:, i] = SKIN[i] * k + SKIN_CHAUD[i] * sss + 255.0 * spec
+    canvas[ys, xs] = np.clip(canvas[ys, xs] * (1 - alpha) + couleurs * alpha, 0, 255).astype("uint8")
+
+
+def _draw_sphere(canvas, point3, radius, camera, mode, profondeur, d_min, d_max, gris=None) -> None:
+    """Rotule ombrée d'une articulation (rayon en mètres)."""
+    import cv2
+    import numpy as np
+
+    view = _view(camera)
+    p = project(point3, camera, canvas.shape[1], canvas.shape[0])
+    r = max(1, int(round(radius * p["scale"])))
+    mask = np.zeros(canvas.shape[:2], dtype="uint8")
+    cv2.circle(mask, (int(p["x"]), int(p["y"])), r, 255, -1, cv2.LINE_AA)
+    ys, xs = np.nonzero(mask)
+    if not len(xs):
+        return
+    alpha = (mask[ys, xs].astype("float64") / 255.0)[:, None]
+    if mode == "silhouette":
+        canvas[ys, xs] = np.clip(canvas[ys, xs] * (1 - alpha) + 255 * alpha, 0, 255).astype("uint8")
+        return
+    if mode == "depth":
+        g = float(gris if gris is not None else 128)
+        canvas[ys, xs] = np.clip(canvas[ys, xs] * (1 - alpha) + g * alpha, 0, 255).astype("uint8")
+        return
+    # normale approchée : la sphère est vue de face, décalée vers la lumière
+    lx, ly = LIGHT[0] * view["r"][0][0] + LIGHT[1] * view["r"][0][1] + LIGHT[2] * view["r"][0][2], -(
+        LIGHT[0] * view["r"][1][0] + LIGHT[1] * view["r"][1][1] + LIGHT[2] * view["r"][1][2])
+    nl = math.hypot(lx, ly) or 1.0
+    ex = (xs - p["x"]) / max(1.0, float(r))
+    ey = (ys - p["y"]) / max(1.0, float(r))
+    ep = np.clip(ex * ex + ey * ey, 0, 1)
+    ez = np.sqrt(np.maximum(0.0, 1.0 - ep))
+    n0 = ex * (lx / nl) * 0.55 + view["eye"][0] * ez
+    n1 = -ey * (ly / nl) * 0.55 + view["eye"][1] * ez
+    n2 = view["eye"][2] * ez + (lx / nl) * 0.55 * 0.2
+    ln = np.sqrt(n0 ** 2 + n1 ** 2 + n2 ** 2)
+    ln[ln == 0] = 1.0
+    n0, n1, n2 = n0 / ln, n1 / ln, n2 / ln
+    eye = view["eye"]
+    diffuse = np.clip(n0 * LIGHT[0] + n1 * LIGHT[1] + n2 * LIGHT[2], 0, None)
+    hx, hy, hz = LIGHT[0] + eye[0], LIGHT[1] + eye[1], LIGHT[2] + eye[2]
+    hl = math.sqrt(hx * hx + hy * hy + hz * hz) or 1.0
+    nh = np.clip((n0 * hx + n1 * hy + n2 * hz) / hl, 0, None)
+    spec = (nh ** SKIN_SHIN) * SKIN_SPEC
+    face = np.abs(n0 * eye[0] + n1 * eye[1] + n2 * eye[2])
+    sss = ((1.0 - face) ** 2.2) * 0.30
+    k = SKIN_AMBIENT + SKIN_DIFFUSE * diffuse
+    couleurs = np.empty((len(xs), 3), dtype="float64")
+    for i in range(3):
+        couleurs[:, i] = SKIN[i] * k + SKIN_CHAUD[i] * sss + 255.0 * spec
+    canvas[ys, xs] = np.clip(canvas[ys, xs] * (1 - alpha) + couleurs * alpha, 0, 255).astype("uint8")
+
+
+def _torso_frame(pose: dict, lengths: dict, f: float) -> dict:
+    """Repère local du tronc à la fraction f (0 = bassin, 1 = cou)."""
+    chain = ["hips", "spine", "chest", "neck"]
+    weights = [max(1e-6, lengths.get("spine", 0.16)), max(1e-6, lengths.get("chest", 0.2)),
+               max(1e-6, lengths.get("neck", 0.1))]
+    total = sum(weights)
     reste = max(0.0, min(1.0, f)) * total
     i = 0
     while i < len(weights) - 1 and reste > weights[i]:
         reste -= weights[i]
         i += 1
-    t = max(0.0, min(1.0, reste / weights[i])) if weights[i] > 0 else 0.0
+    t = max(0.0, min(1.0, reste / weights[i]))
     A, B = pose[chain[i]], pose[chain[i + 1]]
     centre = tuple(A[k] + (B[k] - A[k]) * t for k in range(3))
-    axe = _norm((B[0] - A[0], B[1] - A[1], B[2] - A[2]))
-    return centre, axe
+    axis = _norm(tuple(B[k] - A[k] for k in range(3)))
+    bas = _norm(tuple(pose["hip_l"][k] - pose["hip_r"][k] for k in range(3)))
+    haut = _norm(tuple(pose["shoulder_l"][k] - pose["shoulder_r"][k] for k in range(3)))
+    melange = tuple(bas[k] * (1 - f) + haut[k] * f for k in range(3))
+    proj = tuple(melange[k] - axis[k] * sum(melange[j] * axis[j] for j in range(3)) for k in range(3))
+    x = _norm(proj)
+    if sum(v * v for v in x) < 1e-12:
+        x = bas
+    z = _norm((x[1] * axis[2] - x[2] * axis[1], x[2] * axis[0] - x[0] * axis[2], x[0] * axis[1] - x[1] * axis[0]))
+    if f < 0:
+        centre = tuple(centre[k] - axis[k] * (-f * (weights[0] + weights[1])) for k in range(3))
+    return {"centre": centre, "axis": axis, "x": x, "z": z}
 
 
-def _torso_size(f, thickness, pose):
-    """Largeur/profondeur du tronc à la fraction f, d'après les épaisseurs réglées."""
+def _torso_size(f: float, thickness: dict, pose: dict) -> tuple[float, float]:
+    """Largeur et profondeur du tronc à la fraction f, d'après les épaisseurs réglées."""
     profil = TORSO_PROFILE
     a, b = profil[0], profil[-1]
     for i in range(len(profil) - 1):
@@ -415,212 +652,252 @@ def _torso_size(f, thickness, pose):
     girth = (thickness.get("spine", BASE_THICK["spine"]) + thickness.get("chest", BASE_THICK["chest"])) / (
         BASE_THICK["spine"] + BASE_THICK["chest"])
     width = interp("width") * girth
+    depth = interp("depth") * girth
     epaules = math.dist(pose["shoulder_l"], pose["shoulder_r"]) + 0.05
     hanches = math.dist(pose["hip_l"], pose["hip_r"]) + 0.09
-    refs = (hanches, epaules)
-    for bump, ref in zip(TORSO_BUMPS, refs):
+    for bump, ref in zip(TORSO_BUMPS, (hanches, epaules)):
         g = math.exp(-((f - bump["centre"]) / bump["sigma"]) ** 2)
         width = max(width, ref * bump["scale"] * max(0.12, g))
+    if f < 0:
+        k = max(0.0, min(1.0, (0 - f) / 0.14))
+        ferme = 1 - 0.42 * k
+        return width * ferme, depth * ferme
     retrecissement = 1 - 0.25 * max(0.0, min(1.0, (f - 0.95) / 0.05))
-    return width * retrecissement, interp("depth") * girth * retrecissement
+    return width * retrecissement, depth * retrecissement
 
 
-def _torso_rings(pose, thickness, slices: int = TORSO_SLICES, ring_points: int = 14):
-    """Coupes du tronc : liste de (points 3D, centre 3D) du bassin vers le cou."""
-    chain = ["hips", "spine", "chest", "neck"]
-    weights = [max(1e-6, math.dist(pose[chain[i]], pose[chain[i + 1]])) for i in range(3)]
-    rings = []
-    for i in range(slices):
-        f = i / (slices - 1)
-        centre, axe = _chain_point(pose, chain, weights, f)
-        bas = _norm(tuple(pose["hip_l"][k] - pose["hip_r"][k] for k in range(3)))
-        haut = _norm(tuple(pose["shoulder_l"][k] - pose["shoulder_r"][k] for k in range(3)))
-        melange = tuple(bas[k] * (1 - f) + haut[k] * f for k in range(3))
-        proj = tuple(melange[k] - axe[k] * sum(melange[j] * axe[j] for j in range(3)) for k in range(3))
-        x = _norm(proj)
-        if sum(v * v for v in x) < 1e-12:
-            x = bas
-        z = _norm((x[1] * axe[2] - x[2] * axe[1], x[2] * axe[0] - x[0] * axe[2], x[0] * axe[1] - x[1] * axe[0]))
-        width, depth = _torso_size(f, thickness, pose)
-        pts = []
-        for k in range(ring_points):
-            th = (k / ring_points) * 2 * math.pi
-            pts.append(tuple(centre[j] + x[j] * math.cos(th) * width / 2 + z[j] * math.sin(th) * depth / 2
-                             for j in range(3)))
-        rings.append((pts, centre))
-    return rings
+def _torso_ring(pose: dict, lengths: dict, thickness: dict, f: float, ring_points: int = 16):
+    """Coupe du tronc à la fraction f : points 3D + repère."""
+    frame = _torso_frame(pose, lengths, f)
+    width, depth = _torso_size(f, thickness, pose)
+    pts = []
+    for i in range(ring_points):
+        th = (i / ring_points) * 2 * math.pi
+        pts.append(tuple(frame["centre"][k] + frame["x"][k] * math.cos(th) * width / 2
+                         + frame["z"][k] * math.sin(th) * depth / 2 for k in range(3)))
+    return pts, frame, (width, depth)
 
 
-def _draw_torso(canvas, rings, camera, width, height, mode):
-    """Dessine le tronc : silhouette lissée remplie (dégradé horizontal en mode volume)."""
+def _surface_tronc(pose, lengths, thickness, f, phi):
+    """Point de la surface du tronc (f = hauteur, phi = angle autour du volume)."""
+    frame = _torso_frame(pose, lengths, f)
+    width, depth = _torso_size(f, thickness, pose)
+    return tuple(frame["centre"][k] + frame["x"][k] * math.cos(phi) * width / 2
+                 + frame["z"][k] * math.sin(phi) * depth / 2 for k in range(3))
+
+
+def _couleur_anneau(view, x_axis, z_axis, t):
+    """Couleur de peau à la position t (0 = bord gauche, 1 = bord droit) d'un anneau."""
+
+    theta = math.pi * t
+    c, sn = math.cos(theta), math.sin(theta)
+    normale = tuple(x_axis[k] * c + z_axis[k] * sn for k in range(3))
+    return _skin_bgr(normale, view["eye"])
+
+
+def _draw_rings(canvas, anneaux, camera, mode, profondeur, d_min, d_max, cues=None, gris=None):
+    """Dessine un volume d'anneaux (tronc, tête) : peau ombrée continue, sans couture."""
     import cv2
     import numpy as np
 
-    projected = [[project(pt, camera, width, height) for pt in pts] for pts, _ in rings]
-    centres = [project(c, camera, width, height) for _, c in rings]
-    gauche, droite = [], []
-    for ring in projected:
-        gauche.append(min(ring, key=lambda p: p["x"]))
-        droite.append(max(ring, key=lambda p: p["x"]))
-    poly = np.array([[int(round(p["x"])), int(round(p["y"]))] for p in droite + list(reversed(gauche))], dtype="int32")
-    profondeur = sum(c["depth"] for c in centres) / max(1, len(centres))
-    mask = np.zeros(canvas.shape[:2], dtype="uint8")
+    view = _view(camera)
+    hauteur, largeur = canvas.shape[:2]
+    proj = []
+    for pts, frame, taille in anneaux:
+        p = [project(q, camera, largeur, hauteur) for q in pts]
+        proj.append({"gauche": min(p, key=lambda q: q["x"]), "droite": max(p, key=lambda q: q["x"]),
+                     "centre": project(frame["centre"], camera, largeur, hauteur),
+                     "x": frame["x"], "z": frame["z"]})
+    poly = np.array([[int(round(q["x"])), int(round(q["y"]))] for q in
+                     [a["droite"] for a in proj] + [a["gauche"] for a in reversed(proj)]], dtype="int32")
+    mask = np.zeros((hauteur, largeur), dtype="uint8")
     cv2.fillPoly(mask, [poly], 255, cv2.LINE_AA)
-    if mode == "silhouette":
-        couche = np.full_like(canvas, 255)
-    elif mode == "depth":
-        t = max(0.0, min(1.0, (profondeur - (camera.get("distance", 3.0) - 0.7)) / 1.4))
-        g = int(round(255 - 205 * (1 - t)))
-        couche = np.full(canvas.shape, g, dtype="uint8")
-    else:
-        min_x = min(int(p["x"]) for p in droite + gauche)
-        max_x = max(int(p["x"]) for p in droite + gauche)
-        couche = np.zeros_like(canvas)
-        span = max(1, max_x - min_x)
-        for x in range(max(0, min_x), min(width, max_x + 1)):
-            t = (x - min_x) / span
-            if t < 0.42:
-                k = t / 0.42
-                color = [SKIN[i] * (1.02 - 0.07 * k) for i in range(3)]
-            else:
-                k = (t - 0.42) / 0.58
-                color = [SKIN[i] * 0.95 * (1 - k) + SKIN_DARK[i] * 0.92 * k for i in range(3)]
-            couche[:, x] = [min(255, max(0, int(round(c)))) for c in color]
+    if mode in ("silhouette", "depth"):
+        g = 255.0 if mode == "silhouette" else float(gris if gris is not None else 128)
+        alpha = (mask.astype("float64") / 255.0)[:, :, None]
+        canvas[:, :] = np.clip(canvas * (1 - alpha) + g * alpha, 0, 255).astype("uint8")
+        return
     ys, xs = np.nonzero(mask)
     if not len(xs):
-        return profondeur
-    alpha = (mask[ys, xs].astype("float32") / 255.0)[:, None]
-    region = canvas[ys, xs].astype("float32")
-    canvas[ys, xs] = np.clip(region * (1 - alpha) + couche[ys, xs].astype("float32") * alpha, 0, 255).astype("uint8")
-    return profondeur
+        return
+    # repères de référence pour orienter les normales de la même façon partout
+    ref = proj[len(proj) // 2]
+    axes = []
+    for a in proj:
+        axe_x, axe_z = a["x"], a["z"]
+        if sum(axe_x[k] * ref["x"][k] for k in range(3)) < 0:
+            axe_x = tuple(-v for v in axe_x)
+        if sum(axe_z[k] * ref["z"][k] for k in range(3)) < 0:
+            axe_z = tuple(-v for v in axe_z)
+        axes.append((np.array(axe_x), np.array(axe_z)))
+    ordre = np.argsort([a["centre"]["y"] for a in proj])
+    cy = np.array([proj[i]["centre"]["y"] for i in ordre])
+    cx = np.array([proj[i]["centre"]["x"] for i in ordre])
+    demi = np.array([max(1.0, (proj[i]["droite"]["x"] - proj[i]["gauche"]["x"]) / 2) for i in ordre])
+    ax = np.array([axes[i][0] for i in ordre])          # (n, 3)
+    az = np.array([axes[i][1] for i in ordre])
+    bande = np.clip(np.searchsorted(cy, ys) - 1, 0, len(cy) - 2)
+    suit = np.clip(bande + 1, 0, len(cy) - 1)
+    span = np.maximum(1e-6, cy[suit] - cy[bande])
+    melange = np.clip((ys - cy[bande]) / span, 0, 1)[:, None]
+    centre_x = cx[bande] + (cx[suit] - cx[bande]) * melange[:, 0]
+    demi_x = demi[bande] + (demi[suit] - demi[bande]) * melange[:, 0]
+    n0 = (ax[bande] * (1 - melange) + ax[suit] * melange)
+    n2 = (az[bande] * (1 - melange) + az[suit] * melange)
+    t = np.clip((xs - centre_x) / (2 * demi_x) + 0.5, 0, 1)
+    theta = math.pi * t
+    cos_t, sin_t = np.cos(theta), np.sin(theta)
+    vx = n0[:, 0] * cos_t + n2[:, 0] * sin_t
+    vy = n0[:, 1] * cos_t + n2[:, 1] * sin_t
+    vz = n0[:, 2] * cos_t + n2[:, 2] * sin_t
+    eye = view["eye"]
+    diffuse = np.clip(vx * LIGHT[0] + vy * LIGHT[1] + vz * LIGHT[2], 0, None)
+    hx, hy, hz = LIGHT[0] + eye[0], LIGHT[1] + eye[1], LIGHT[2] + eye[2]
+    hl = math.sqrt(hx * hx + hy * hy + hz * hz) or 1.0
+    nh = np.clip((vx * hx + vy * hy + vz * hz) / hl, 0, None)
+    spec = (nh ** SKIN_SHIN) * SKIN_SPEC
+    face = np.abs(vx * eye[0] + vy * eye[1] + vz * eye[2])
+    sss = ((1.0 - face) ** 2.2) * 0.38
+    k = SKIN_AMBIENT + SKIN_DIFFUSE * diffuse
+    couleurs = np.empty((len(xs), 3), dtype="float64")
+    for c in range(3):
+        couleurs[:, c] = SKIN[c] * k + SKIN_CHAUD[c] * sss + 255.0 * spec
+    alpha = (mask[ys, xs].astype("float64") / 255.0)[:, None]
+    canvas[ys, xs] = np.clip(canvas[ys, xs] * (1 - alpha) + couleurs * alpha, 0, 255).astype("uint8")
 
 
-def _draw_cap(canvas, point, radius, camera, mode, profondeur, d_min, d_max):
-    """Rotule : disque de la même teinte que les segments (silhouette, profondeur ou volume)."""
+def _head_frame(pose: dict, thickness: dict) -> dict:
+    """Repère de la tête : axe cou → sommet, largeur et profondeur réglées."""
+    bas, haut = pose["neck"], pose["head_top"]
+    axis = _norm(tuple(haut[k] - bas[k] for k in range(3)))
+    epaules = _norm(tuple(pose["shoulder_l"][k] - pose["shoulder_r"][k] for k in range(3)))
+    proj = tuple(epaules[k] - axis[k] * sum(epaules[j] * axis[j] for j in range(3)) for k in range(3))
+    x = _norm(proj)
+    if sum(v * v for v in x) < 1e-12:
+        x = (1.0, 0.0, 0.0)
+    z = _norm((x[1] * axis[2] - x[2] * axis[1], x[2] * axis[0] - x[0] * axis[2], x[0] * axis[1] - x[1] * axis[0]))
+    avant = _norm(tuple(pose["nose"][k] - bas[k] for k in range(3))) if "nose" in pose else z
+    if sum(z[k] * avant[k] for k in range(3)) < 0:
+        z = tuple(-v for v in z)
+    largeur = thickness.get("head", 0.176)
+    return {"bas": bas, "haut": haut, "axis": axis, "x": x, "z": z,
+            "longueur": math.dist(bas, haut), "largeur": largeur, "profondeur": largeur * 1.18}
+
+
+def _head_profile(u: float) -> float:
+    """Galbe de la tête (0 = menton, 1 = sommet)."""
+    profil = [(0, 0.26), (0.06, 0.46), (0.14, 0.62), (0.26, 0.80), (0.40, 0.92),
+              (0.56, 0.99), (0.72, 1.0), (0.85, 0.94), (0.94, 0.78), (1, 0.40)]
+    return _profil_valeur(profil, u)
+
+
+def _head_face(u: float) -> float:
+    """Avancée du visage (fraction de la profondeur) selon la hauteur."""
+    return 0.16 * math.exp(-((u - 0.22) / 0.20) ** 2) + 0.10 * math.exp(-((u - 0.48) / 0.30) ** 2)
+
+
+def _head_rings(pose: dict, thickness: dict, slices: int = 11, ring_points: int = 14):
+    """Anneaux de la tête du menton au sommet."""
+    fr = _head_frame(pose, thickness)
+    anneaux = []
+    for i in range(slices):
+        u = i / (slices - 1)
+        centre = tuple(fr["bas"][k] + fr["axis"][k] * fr["longueur"] * (u * 0.96 - 0.10)
+                       + fr["z"][k] * fr["profondeur"] * _head_face(u) for k in range(3))
+        r = _head_profile(u)
+        pts = []
+        for j in range(ring_points):
+            th = (j / ring_points) * 2 * math.pi
+            pts.append(tuple(centre[k] + fr["x"][k] * math.cos(th) * fr["largeur"] / 2 * r * 1.02
+                             + fr["z"][k] * math.sin(th) * fr["profondeur"] / 2 * r for k in range(3)))
+        anneaux.append((pts, {"centre": centre, "x": fr["x"], "z": fr["z"], "axis": fr["axis"]}, (0.0, 0.0)))
+    return anneaux, fr
+
+
+def _head_surface(fr, u, phi):
+    r = _head_profile(u)
+    centre = tuple(fr["bas"][k] + fr["axis"][k] * fr["longueur"] * (u * 0.96 - 0.10)
+                   + fr["z"][k] * fr["profondeur"] * _head_face(u) for k in range(3))
+    return tuple(centre[k] + fr["x"][k] * math.cos(phi) * fr["largeur"] / 2 * r * 1.02
+                 + fr["z"][k] * math.sin(phi) * fr["profondeur"] / 2 * r for k in range(3))
+
+
+def _tache(canvas, p3, rx, ry, couleur, alpha, camera) -> None:
+    """Tache douce (repère anatomique, œil, bouche…) dessinée sur la peau."""
     import cv2
     import numpy as np
 
-    p = project(point, camera, canvas.shape[1], canvas.shape[0])
-    r = max(1, int(round(radius * p["scale"])))
+    p = project(p3, camera, canvas.shape[1], canvas.shape[0])
+    r = max(1, int(round(max(rx, ry) * p["scale"])))
+    if r < 1:
+        return
     mask = np.zeros(canvas.shape[:2], dtype="uint8")
-    cv2.circle(mask, (int(p["x"]), int(p["y"])), r, 255, -1, cv2.LINE_AA)
-    if mode == "silhouette":
-        couche = np.full_like(canvas, 255)
-    elif mode == "depth":
-        t = 0.5 if d_max <= d_min else (profondeur - d_min) / (d_max - d_min)
-        g = int(round(255 - 205 * t))
-        couche = np.full(canvas.shape, g, dtype="uint8")
-    else:
-        couche = np.zeros_like(canvas)
-        x0, x1 = int(p["x"] - r), int(p["x"] + r)
-        span = max(1, x1 - x0)
-        for x in range(max(0, x0), min(canvas.shape[1], x1 + 1)):
-            t = (x - x0) / span
-            if t < 0.45:
-                k = t / 0.45
-                color = [SKIN[i] * (1.01 - 0.06 * k) for i in range(3)]
-            else:
-                k = (t - 0.45) / 0.55
-                color = [SKIN[i] * 0.95 * (1 - k) + SKIN_DARK[i] * 0.94 * k for i in range(3)]
-            couche[:, x] = [min(255, max(0, int(round(c)))) for c in color]
+    cv2.ellipse(mask, (int(p["x"]), int(p["y"])), (max(1, int(rx * p["scale"])), max(1, int(ry * p["scale"]))),
+                0, 0, 360, 255, -1, cv2.LINE_AA)
     ys, xs = np.nonzero(mask)
     if not len(xs):
         return
-    alpha = (mask[ys, xs].astype("float32") / 255.0)[:, None]
-    region = canvas[ys, xs].astype("float32")
-    canvas[ys, xs] = np.clip(region * (1 - alpha) + couche[ys, xs].astype("float32") * alpha, 0, 255).astype("uint8")
+    a = max(0.0, min(1.0, alpha))
+    canvas[ys, xs] = (canvas[ys, xs] * (1 - a) + np.array(couleur, dtype="float64") * a).astype("uint8")
 
 
-def _capsule(canvas, p0, p1, r0, r1, color, alpha=1.0):
-    """Dessine une capsule (segment à bouts ronds) sur un calque BGR."""
-    import cv2
-    import numpy as np
-
-    overlay = np.zeros_like(canvas)
-    a = (int(round(p0["x"])), int(round(p0["y"])))
-    b = (int(round(p1["x"])), int(round(p1["y"])))
-    dx, dy = b[0] - a[0], b[1] - a[1]
-    length = math.hypot(dx, dy)
-    if length < 1e-3:
-        cv2.circle(overlay, a, max(1, int(round(r0))), color, -1)
-    else:
-        nx, ny = -dy / length, dx / length
-        quad = np.array([
-            [a[0] + nx * r0, a[1] + ny * r0], [b[0] + nx * r1, b[1] + ny * r1],
-            [b[0] - nx * r1, b[1] - ny * r1], [a[0] - nx * r0, a[1] - ny * r0],
-        ], dtype="int32")
-        cv2.fillConvexPoly(overlay, quad, color, cv2.LINE_AA)
-        cv2.circle(overlay, a, max(1, int(round(r0))), color, -1, cv2.LINE_AA)
-        cv2.circle(overlay, b, max(1, int(round(r1))), color, -1, cv2.LINE_AA)
-    if alpha >= 1.0:
-        cv2.copyTo(overlay, overlay, canvas)
-        return
-    np.copyto(canvas, (canvas * (1 - alpha) + overlay * alpha).astype("uint8"), where=overlay > 0)
+JOINT_BALLS: tuple = ()                # rotules à dessiner en plus des segments (aucune par défaut)
 
 
-def _shaded_capsule(canvas, p0, p1, r0, r1, base, dark, depth_t):
-    """Capsule ombrée : dégradé perpendiculaire à l'os (lumière en haut à gauche)."""
-    import cv2
-    import numpy as np
-
-    h, w = canvas.shape[:2]
-    mask = np.zeros((h, w), dtype="uint8")
-    a = (int(round(p0["x"])), int(round(p0["y"])))
-    b = (int(round(p1["x"])), int(round(p1["y"])))
-    dx, dy = b[0] - a[0], b[1] - a[1]
-    length = math.hypot(dx, dy)
-    rr = [max(1, int(round(r0))), max(1, int(round(r1)))]
-    if length < 1e-3:
-        cv2.circle(mask, a, rr[0], 255, -1, cv2.LINE_AA)
-    else:
-        nx, ny = -dy / length, dx / length
-        quad = np.array([
-            [a[0] + nx * rr[0], a[1] + ny * rr[0]], [b[0] + nx * rr[1], b[1] + ny * rr[1]],
-            [b[0] - nx * rr[1], b[1] - ny * rr[1]], [a[0] - nx * rr[0], a[1] - ny * rr[0]],
-        ], dtype="int32")
-        cv2.fillConvexPoly(mask, quad, 255, cv2.LINE_AA)
-        cv2.circle(mask, a, rr[0], 255, -1, cv2.LINE_AA)
-        cv2.circle(mask, b, rr[1], 255, -1, cv2.LINE_AA)
-    ys, xs = np.nonzero(mask)
-    if not len(xs):
-        return
-    light = 0.98 + 0.10 * (1.0 - depth_t)
-    cx, cy = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
-    nx = -(dy / length) if length > 1e-3 else 0.0
-    ny = (dx / length) if length > 1e-3 else 0.0
-    half = max(rr) or 1
-    t = (((xs - cx) * nx + (ys - cy) * ny) / half + 1) / 2      # 0 = côté éclairé
-    t = np.clip(t, 0, 1).astype("float32")
-    lit = np.array([min(255.0, c * light * 1.04) for c in base], dtype="float32")
-    mid = np.array([min(255.0, c * light * 0.95) for c in base], dtype="float32")
-    shade = np.array([min(255.0, c * light * 0.88) for c in dark], dtype="float32")
-    k = np.clip((t - 0.45) / 0.55, 0, 1)[:, None]
-    k0 = np.clip(t / 0.45, 0, 1)[:, None]
-    color = lit[None, :] * (1 - k0) + mid[None, :] * k0
-    color = color * (1 - k) + shade[None, :] * k
-    layer = np.zeros_like(canvas)
-    layer[ys, xs] = np.clip(color, 0, 255).astype("uint8")
-    alpha = (mask[ys, xs].astype("float32") / 255.0)[:, None]
-    region = canvas[ys, xs].astype("float32")
-    canvas[ys, xs] = np.clip(region * (1 - alpha) + layer[ys, xs].astype("float32") * alpha, 0, 255).astype("uint8")
+def _joint_radius(joint: str, thickness: dict) -> float:
+    """Rayon de la rotule : celui des segments qui s'y raccordent."""
+    r = 0.02
+    for parent, child, *_ in BONES:
+        if child == joint:
+            r = max(r, _mean_radius(child, thickness) * profile_at(child, 0.0))
+        if parent == joint:
+            r = max(r, _mean_radius(child, thickness) * profile_at(child, 1.0),
+                    _mean_radius(child, thickness) * profile_at(child, 0.0) * 0.92)
+    if joint in ("hip_l", "hip_r"):
+        r = min(r, 0.052)
+    if joint in ("shoulder_l", "shoulder_r"):
+        r = min(r, 0.046)
+    if joint in ("elbow_l", "elbow_r", "knee_l", "knee_r"):
+        r *= 0.94
+    return r
 
 
 def _grid(canvas, camera, width, height):
+    """Sol quadrillé (repère de profondeur) sous le personnage."""
     import cv2
     for i in range(-6, 7):
         a = project((i * 0.35, 0.0, -2.2), camera, width, height)
         b = project((i * 0.35, 0.0, 3.4), camera, width, height)
-        cv2.line(canvas, (int(a["x"]), int(a["y"])), (int(b["x"]), int(b["y"])), (96, 88, 78), 1, cv2.LINE_AA)
+        cv2.line(canvas, (int(a["x"]), int(a["y"])), (int(b["x"]), int(b["y"])), (78, 88, 96), 1, cv2.LINE_AA)
         c = project((-2.2, 0.0, i * 0.35), camera, width, height)
         d = project((3.4, 0.0, i * 0.35), camera, width, height)
-        cv2.line(canvas, (int(c["x"]), int(c["y"])), (int(d["x"]), int(d["y"])), (96, 88, 78), 1, cv2.LINE_AA)
+        cv2.line(canvas, (int(c["x"]), int(c["y"])), (int(d["x"]), int(d["y"])), (78, 88, 96), 1, cv2.LINE_AA)
+
+
+def _mean_radius(child: str, thickness: dict) -> float:
+    """Rayon moyen d'un segment (moitié de l'épaisseur réglée)."""
+    t = thickness.get(child)
+    if t:
+        return t / 2
+    return BASE_THICK.get(child, 0.08) / 2
+
+
+# Repères anatomiques du tronc (f = hauteur, phi = angle autour du volume)
+CUES_TRONC = [
+    {"f": 0.90, "phi": 0.55, "rx": 0.055, "ry": 0.020, "alpha": 0.045, "clair": True},
+    {"f": 0.90, "phi": 2.59, "rx": 0.055, "ry": 0.020, "alpha": 0.045, "clair": True},
+    {"f": 0.755, "phi": 1.10, "rx": 0.042, "ry": 0.030, "alpha": 0.05},
+    {"f": 0.755, "phi": 2.04, "rx": 0.042, "ry": 0.030, "alpha": 0.05},
+    {"f": 0.50, "phi": 1.57, "rx": 0.013, "ry": 0.011, "alpha": 0.22},
+    {"f": 0.26, "phi": 4.71, "rx": 0.055, "ry": 0.024, "alpha": 0.07},
+]
 
 
 def render(payload: dict, mode: str = "volume", width: int = 768, height: int = 1024) -> "object":
     """Rend le mannequin dans le mode demandé et renvoie une image BGR (uint8).
 
-    L'image produite ne contient que le personnage (fond sombre, ombre au sol discrète) :
-    elle sert directement d'image de contrôle ou d'image de référence.
+    Le personnage est dessiné comme un corps : tronc et membres galbés, peau ombrée
+    (lumière de haut-gauche, reflet, liseré chaud), tête et pieds reconnaissables.
     """
     _require_cv()
     import cv2
@@ -630,6 +907,7 @@ def render(payload: dict, mode: str = "volume", width: int = 768, height: int = 
         raise MannequinError(f"rendu inconnu : {mode}")
     width, height = max(128, int(width)), max(128, int(height))
     build, pose, camera = prepare(payload, width, height)
+    lengths, thickness = build["lengths"], build["thickness"]
 
     ss = 2 if mode in ("volume", "wireframe") else 1     # anticrénelage
     W, H = width * ss, height * ss
@@ -638,7 +916,6 @@ def render(payload: dict, mode: str = "volume", width: int = 768, height: int = 
     if mode == "openpose":
         canvas = np.zeros((H, W, 3), dtype="uint8")
 
-    # projection de toutes les articulations
     projected = {name: project(pose[name], camera, W, H) for name in pose}
 
     if mode == "openpose":
@@ -656,117 +933,115 @@ def render(payload: dict, mode: str = "volume", width: int = 768, height: int = 
 
     if mode == "depth":
         canvas = np.zeros((H, W, 3), dtype="uint8")
-
-    # l'image exportée reste propre : pas de grille d'édition, seulement l'ombre au sol
     if mode == "volume" and payload.get("ground"):
         _grid(canvas, camera, W, H)
-
-    # ombre portée au sol : dessinée AVANT le corps (elle reste derrière lui)
     if mode in ("volume", "wireframe"):
-        hips = pose.get("hips", [0, 0, 0])
+        hips = pose.get("hips", (0, 0, 0))
         sol = project((hips[0], 0.002, hips[2]), camera, W, H)
         shadow = np.zeros_like(canvas)
         cv2.ellipse(shadow, (int(sol["x"]), int(sol["y"])),
                     (int(0.60 * sol["scale"]), int(0.17 * sol["scale"])), 0, 0, 360, (52, 40, 34), -1, cv2.LINE_AA)
         np.copyto(canvas, (canvas * 0.68 + shadow * 0.32).astype("uint8"), where=shadow > 0)
 
-    thickness = build["thickness"]
-    radii = bone_radii(thickness)
-    skip = {"hip_l", "hip_r"} if mode == "volume" else set()
-    caps = ("elbow_l", "elbow_r", "knee_l", "knee_r", "wrist_l", "wrist_r", "ankle_l", "ankle_r")
+    anatomique = mode in ("volume", "silhouette", "depth")
+    items = []
+    if anatomique:
+        anneaux = []
+        for i in range(TORSO_SLICES):
+            f = TORSO_BAS + (i / (TORSO_SLICES - 1)) * (1 - TORSO_BAS)
+            pts, frame, taille = _torso_ring(pose, lengths, thickness, f)
+            anneaux.append((pts, frame, taille))
+        profondeur = sum(project(a[1]["centre"], camera, W, H)["depth"] for a in anneaux) / len(anneaux)
+        items.append({"type": "torso", "anneaux": anneaux, "depth": profondeur})
+        tete, fr = _head_rings(pose, thickness)
+        items.append({"type": "head", "anneaux": tete, "frame": fr,
+                      "depth": project(fr["bas"], camera, W, H)["depth"] - 0.01})
+        for cote in ("l", "r"):
+            ankle = pose["ankle_" + cote]
+            cheville = thickness.get("ankle_" + cote, 0.102)
+            doigts = thickness.get("toe_" + cote, 0.08)
+            cote3 = cheville * 0.44
+            lame = doigts * 0.46
+            bas = (ankle[0], 0.012, ankle[2])
+            basT = (pose["toe_" + cote][0], 0.016, pose["toe_" + cote][2])
+            basH = (pose["heel_" + cote][0], 0.014, pose["heel_" + cote][2])
+            items.append({"type": "foot", "a3": basH, "b3": bas, "c3": basT,
+                          "rTal": cote3 * 1.02, "rAvant": cote3 * 0.98, "rPointe": lame * 0.95,
+                          "depth": max(project(bas, camera, W, H)["depth"], project(basT, camera, W, H)["depth"]) + 0.01})
 
-    # éléments : tronc, rotules, os — triés du plus lointain au plus proche
-    elements = []
-    if mode in ("volume", "silhouette", "depth"):
-        rings = _torso_rings(pose, thickness)
-        centres = [project(c, camera, W, H) for _, c in rings]
-        elements.append({"type": "torso", "rings": rings,
-                         "depth": sum(c["depth"] for c in centres) / max(1, len(centres))})
-        for joint in caps:
-            if joint not in pose:
-                continue
-            best = 0.0
-            for (a, b, _r1, _r2, _k), (r1, r2) in zip(BONES, radii):
-                if a == joint:
-                    best = max(best, min(r1, r2))
-            p_cap = project(pose[joint], camera, W, H)
-            elements.append({"type": "cap", "joint": joint, "radius": best * 0.99,
-                             "depth": p_cap["depth"] - 0.002, "point": pose[joint]})
-    for (a, b, _r1, _r2, kind), (r1, r2) in zip(BONES, radii):
-        if b in skip or a not in pose or b not in pose:
+    for parent, child, *_ in BONES:
+        if anatomique and (child in ("hip_l", "hip_r", "shoulder_l", "shoulder_r", "spine", "chest", "head", "head_top",
+                                     "nose", "toe_l", "toe_r", "heel_l", "heel_r")):
             continue
-        p0 = project(pose[a], camera, W, H)
-        p1 = project(pose[b], camera, W, H)
-        elements.append({"type": "bone", "p0": p0, "p1": p1, "r0": r1, "r1": r2, "part": kind,
-                         "depth": (p0["depth"] + p1["depth"]) / 2})
-    elements.sort(key=lambda e: -e["depth"])
-    depths = [e["depth"] for e in elements] or [camera.get("distance", 3.0)]
-    d_min, d_max = min(depths), max(depths)
+        pa, pb = projected.get(parent), projected.get(child)
+        if pa is None or pb is None:
+            continue
+        items.append({"type": "limb", "a": pa, "b": pb, "a3": pose[parent], "b3": pose[child],
+                      "child": child, "profil": LIMB_PROFILE.get(child, [(0, 1.0), (1, 1.0)]),
+                      "mean_r": _mean_radius(child, thickness), "depth": (pa["depth"] + pb["depth"]) / 2})
 
-    for el in elements:
-        if el["type"] == "torso":
-            el["depth"] = _draw_torso(canvas, el["rings"], camera, W, H, mode)
-            continue
-        if el["type"] == "cap":
-            _draw_cap(canvas, el["point"], el["radius"], camera, mode, el["depth"], d_min, d_max)
-            continue
-        p0, p1, r0, r1 = el["p0"], el["p1"], el["r0"] * el["p0"]["scale"], el["r1"] * el["p1"]["scale"]
-        depth_t = 0.5 if d_max <= d_min else (el["depth"] - d_min) / (d_max - d_min)
-        if mode == "silhouette":
-            _capsule(canvas, p0, p1, r0, r1, (255, 255, 255))
-            continue
-        if mode == "depth":
-            grey = int(round(255 - 205 * depth_t))
-            _capsule(canvas, p0, p1, r0, r1, (grey, grey, grey))
-            continue
-        if mode == "wireframe":
-            _capsule(canvas, p0, p1, max(2.0, r0 * 0.42), max(2.0, r1 * 0.42),
-                     LIMB_COLOR.get(el["part"], (232, 147, 139)))
-            continue
-        _shaded_capsule(canvas, p0, p1, r0, r1, SKIN, SKIN_DARK, depth_t)
+    if anatomique:
+        for joint in JOINT_BALLS:            # aucune rotule : le galbe des segments suffit
+            items.append({"type": "joint", "joint": joint, "r": _joint_radius(joint, thickness) * 0.98,
+                          "depth": projected[joint]["depth"] - 0.005})
 
-    # ombre portée au sol : dessinée AVANT le corps (elle reste derrière lui)
-    if mode in ("volume", "wireframe"):
-        hips = pose.get("hips", [0, 0, 0])
-        sol = project((hips[0], 0.002, hips[2]), camera, W, H)
-        shadow = np.zeros_like(canvas)
-        cv2.ellipse(shadow, (int(sol["x"]), int(sol["y"])),
-                    (int(0.60 * sol["scale"]), int(0.17 * sol["scale"])), 0, 0, 360, (52, 40, 34), -1, cv2.LINE_AA)
-        np.copyto(canvas, (canvas * 0.68 + shadow * 0.32).astype("uint8"), where=shadow > 0)
+    items.sort(key=lambda it: -it["depth"])
+    profondeurs = [it["depth"] for it in items] or [camera.get("distance", 3.0)]
+    d_min, d_max = min(profondeurs), max(profondeurs)
 
-    radii = bone_radii(build)
-    parts = []
-    for (a, b, _r1, _r2, kind), (r1, r2) in zip(BONES, radii):
-        if a not in projected or b not in projected:
-            continue
-        parts.append((projected[a], projected[b], r1, r2, kind,
-                      (projected[a]["depth"] + projected[b]["depth"]) / 2))
-    parts.sort(key=lambda p: -p[5])                          # peintre : loin → proche
-    depths = [p[5] for p in parts] or [camera.get("distance", 4.2)]
-    d_min, d_max = min(depths), max(depths)
+    def gris(depth: float) -> int:
+        t = 0.5 if d_max <= d_min else (depth - d_min) / (d_max - d_min)
+        return int(round(255 - 205 * t))
 
-    for p0, p1, r1, r2, kind, depth in parts:
-        depth_t = 0.5 if d_max <= d_min else (depth - d_min) / (d_max - d_min)
-        if mode == "silhouette":
-            _capsule(canvas, p0, p1, r1 * p0["scale"], r2 * p1["scale"], (255, 255, 255))
-            continue
-        if mode == "depth":
-            grey = int(round(255 - 205 * depth_t))   # proche = blanc, loin = sombre
-            _capsule(canvas, p0, p1, r1 * p0["scale"], r2 * p1["scale"], (grey, grey, grey))
-            continue
-        if mode == "wireframe":
-            _capsule(canvas, p0, p1, max(2.0, r1 * p0["scale"] * 0.42), max(2.0, r2 * p1["scale"] * 0.42),
-                     LIMB_COLOR.get(kind, (232, 147, 139)))
-            continue
-        _shaded_capsule(canvas, p0, p1, r1 * p0["scale"], r2 * p1["scale"], SKIN, SKIN_DARK, depth_t)
+    for it in items:
+        if it["type"] == "torso":
+            _draw_rings(canvas, it["anneaux"], camera, mode, it["depth"], d_min, d_max,
+                        gris=gris(it["depth"]))
+        elif it["type"] == "head":
+            _draw_rings(canvas, it["anneaux"], camera, mode, it["depth"], d_min, d_max,
+                        gris=gris(it["depth"]))
+        elif it["type"] == "foot":
+            profil_talon = [(0, it["rTal"]), (1, it["rTal"] * 0.88)]
+            profil_avant = [(0, it["rAvant"]), (1, it["rAvant"] * 0.7 + it["rPointe"] * 0.3)]
+            _draw_limb(canvas, project(it["a3"], camera, W, H), project(it["b3"], camera, W, H),
+                       profil_talon, 1.0, it["a3"], it["b3"], camera, mode, gris(it["depth"]))
+            _draw_limb(canvas, project(it["b3"], camera, W, H), project(it["c3"], camera, W, H),
+                       profil_avant, 1.0, it["b3"], it["c3"], camera, mode, gris(it["depth"]))
+        elif it["type"] == "joint":
+            _draw_sphere(canvas, pose[it["joint"]], it["r"], camera, mode, it["depth"], d_min, d_max,
+                         gris=gris(it["depth"]))
+        else:
+            _draw_limb(canvas, it["a"], it["b"], it["profil"], it["mean_r"], it["a3"], it["b3"],
+                       camera, mode, gris(it["depth"]))
 
-    if mode == "silhouette":
-        # masque net : uniquement du blanc sur du noir (utilisable comme masque de composition)
-        canvas = np.where(canvas > 127, 255, 0).astype("uint8")
+    if mode == "volume" and payload.get("anatomy") is not False:
+        for cue in CUES_TRONC:
+            p3 = _surface_tronc(pose, lengths, thickness, cue["f"], cue["phi"])
+            couleur = (255, 246, 239) if cue.get("clair") else (18, 26, 43)
+            _tache(canvas, p3, cue["rx"], cue["ry"], couleur, cue["alpha"], camera)
+        fr_tete = _head_rings(pose, thickness)[1]
+        lg = fr_tete["largeur"]
+        surface_tete = lambda u, phi: _head_surface(fr_tete, u, phi)     # noqa: E731
+        for cote in (1, -1):                       # yeux et orbites
+            _tache(canvas, surface_tete(0.60, math.pi / 2 + cote * 0.42), lg * 0.10, lg * 0.052,
+                   (41, 50, 74), 0.50, camera)
+            _tache(canvas, surface_tete(0.65, math.pi / 2 + cote * 0.42), lg * 0.13, lg * 0.040,
+                   (20, 26, 43), 0.12, camera)
+        _tache(canvas, surface_tete(0.55, math.pi / 2), lg * 0.075, lg * 0.115,      # arete du nez
+               (232, 242, 255), 0.30, camera)
+        _tache(canvas, surface_tete(0.62, math.pi / 2), lg * 0.02, lg * 0.02,         # bout du nez
+               (143, 164, 201), 0.25, camera)
+        _tache(canvas, surface_tete(0.34, math.pi / 2), lg * 0.13, lg * 0.035,        # bouche
+               (52, 63, 109), 0.42, camera)
+        _tache(canvas, surface_tete(0.20, math.pi / 2), lg * 0.10, lg * 0.05,         # menton
+               (216, 231, 255), 0.18, camera)
+        for cote in (1, -1):                       # oreilles
+            _tache(canvas, surface_tete(0.55, cote * 0.02), lg * 0.045, lg * 0.085,
+                   (143, 169, 211), 0.85, camera)
+
     if ss > 1:
         canvas = cv2.resize(canvas, (width, height), interpolation=cv2.INTER_AREA)
     if mode == "silhouette":
-        # le masque exporté est binaire : les jointures entre segments sont comblées
         blanc = np.where(canvas.max(axis=2) > 40, 255, 0).astype("uint8")
         canvas = np.repeat(blanc[:, :, None], 3, axis=2)
     return canvas

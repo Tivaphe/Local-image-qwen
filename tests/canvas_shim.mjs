@@ -36,6 +36,33 @@ function parseColor(c) {
   return { r: 128, g: 128, b: 128, a: 1 };
 }
 
+class RadialGradient {
+  constructor(x0, y0, r0, x1, y1, r1) {
+    this.x0 = x0; this.y0 = y0; this.r0 = Math.max(0, r0);
+    this.x1 = x1; this.y1 = y1; this.r1 = Math.max(0.001, r1); this.stops = [];
+  }
+  addColorStop(pos, color) { this.stops.push([pos, parseColor(color)]); return this; }
+  /** Couleur interpolée selon la distance au foyer du dégradé radial. */
+  at(x, y) {
+    const d = Math.hypot(x - this.x1, y - this.y1);
+    const t = Math.max(0, Math.min(1, (d - this.r0) / (this.r1 - this.r0)));
+    const stops = this.stops.slice().sort((a, b) => a[0] - b[0]);
+    if (!stops.length) return { r: 128, g: 128, b: 128, a: 1 };
+    if (t <= stops[0][0]) return stops[0][1];
+    for (let i = 1; i < stops.length; i++) {
+      if (t <= stops[i][0]) {
+        const [p0, c0] = stops[i - 1], [p1, c1] = stops[i];
+        const k = p1 === p0 ? 0 : (t - p0) / (p1 - p0);
+        return {
+          r: c0.r + (c1.r - c0.r) * k, g: c0.g + (c1.g - c0.g) * k,
+          b: c0.b + (c1.b - c0.b) * k, a: c0.a + (c1.a - c0.a) * k,
+        };
+      }
+    }
+    return stops[stops.length - 1][1];
+  }
+}
+
 class LinearGradient {
   constructor(x0, y0, x1, y1) {
     this.x0 = x0; this.y0 = y0; this.x1 = x1; this.y1 = y1; this.stops = [];
@@ -107,6 +134,20 @@ export class Canvas2DShim {
     const last = this._path[this._path.length - 1];
     if (!last || last.closed) { this._current = [x, y]; this._path.push({ points: [this._current], closed: false }); }
   }
+  /** Courbe quadratique (utilisée pour les lèvres et les élastiques). */
+  quadraticCurveTo(cx, cy, x, y) {
+    const debut = this._current ? [this._current[0], this._current[1]] : [cx, cy];
+    this._ensureSubpath(debut[0], debut[1]);
+    const steps = 10;
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps, u = 1 - t;
+      const px = u * u * debut[0] + 2 * u * t * cx + t * t * x;
+      const py = u * u * debut[1] + 2 * u * t * cy + t * t * y;
+      this._current = [px, py];
+      this._path[this._path.length - 1].points.push(this._current);
+    }
+  }
+
   arc(cx, cy, r, a0, a1, ccw) {
     // comme un vrai canvas : le sens compte (par défaut, les angles CROISSENT)
     let sweep = a1 - a0;
@@ -144,6 +185,8 @@ export class Canvas2DShim {
 
   createLinearGradient(x0, y0, x1, y1) { return new LinearGradient(x0, y0, x1, y1); }
 
+  createRadialGradient(x0, y0, r0, x1, y1, r1) { return new RadialGradient(x0, y0, r0, x1, y1, r1); }
+
   clearRect(x, y, w, h) {
     for (let yy = Math.max(0, y | 0); yy < Math.min(this.height, (y + h) | 0); yy++) {
       for (let xx = Math.max(0, x | 0); xx < Math.min(this.width, (x + w) | 0); xx++) this._set(xx, yy, 0, 0, 0, 1);
@@ -164,7 +207,8 @@ export class Canvas2DShim {
   }
 
   _sample(style, x, y) {
-    const c = style instanceof LinearGradient ? style.at(x, y) : parseColor(style);
+    const c = (style instanceof LinearGradient || style instanceof RadialGradient)
+      ? style.at(x, y) : parseColor(style);
     return c;
   }
 

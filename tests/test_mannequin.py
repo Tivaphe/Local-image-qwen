@@ -123,13 +123,15 @@ def test_taille_du_personnage_suit_les_longueurs():
     assert (grand["head_top"][1] - grand["ankle_l"][1]) / (petit["head_top"][1] - petit["ankle_l"][1]) > 1.15
 
 
-def test_trone_suit_les_epaisseurs_reglees():
+def test_tronc_suit_les_epaisseurs_reglees():
     """Le tronc est reconstruit à partir des épaisseurs : plus large quand on épaissit poitrine/bassin."""
-    def largeur(thickness):
-        pose = mannequin.default_pose()
-        rings = mannequin._torso_rings(pose, thickness)
-        haut = rings[-6][0]
-        return max(p[0] for p in haut) - min(p[0] for p in haut)
+    lengths = mannequin.bone_lengths()
+    pose = mannequin.default_pose(lengths)
+
+    def largeur(thickness, f=0.70):
+        pts, _frame, _taille = mannequin._torso_ring(pose, lengths, thickness, f)
+        return max(p[0] for p in pts) - min(p[0] for p in pts)
+
     ref = dict(mannequin.BASE_THICK)
     gros = dict(mannequin.BASE_THICK)
     gros["spine"] = gros["chest"] = 0.45

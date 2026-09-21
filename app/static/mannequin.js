@@ -192,14 +192,14 @@
   // Toutes les dimensions sont FIXES : le tableau de réglages de l'interface écrit ici.
   // Longueurs de chaque segment (mètres) et épaisseurs (diamètre au milieu, mètres).
   const BASE_LENGTHS = {
-    spine: 0.16, chest: 0.20, neck: 0.10, head: 0.13, head_top: 0.10,
+    spine: 0.16, chest: 0.20, neck: 0.115, head: 0.13, head_top: 0.10,
     shoulder_l: 0.19, elbow_l: 0.28, wrist_l: 0.25, hand_l: 0.10,
     shoulder_r: 0.19, elbow_r: 0.28, wrist_r: 0.25, hand_r: 0.10,
     hip_l: 0.11, knee_l: 0.44, ankle_l: 0.42, toe_l: 0.17, heel_l: 0.08,
     hip_r: 0.11, knee_r: 0.44, ankle_r: 0.42, toe_r: 0.17, heel_r: 0.08,
   };
   const BASE_THICK = {
-    spine: 0.262, chest: 0.315, neck: 0.168, head: 0.176, head_top: 0.155,
+    spine: 0.262, chest: 0.315, neck: 0.116, head: 0.172, head_top: 0.150,
     shoulder_l: 0.108, elbow_l: 0.110, wrist_l: 0.088, hand_l: 0.075,
     shoulder_r: 0.108, elbow_r: 0.110, wrist_r: 0.088, hand_r: 0.075,
     hip_l: 0.180, knee_l: 0.150, ankle_l: 0.102, toe_l: 0.080, heel_l: 0.074,
@@ -274,25 +274,85 @@
   // poitrine → épaules). Le rendu est une silhouette lisse et pleine, qui suit la pose,
   // au lieu d'un empilement de capsules qui s'écrasaient au bassin et au buste.
   const TORSO_PROFILE = [
-    { at: 0.00, width: 0.170, depth: 0.165 },
-    { at: 0.16, width: 0.190, depth: 0.198 },   // bassin (renforcé par le bombé ci-dessous)
-    { at: 0.45, width: 0.158, depth: 0.172 },   // taille
-    { at: 0.70, width: 0.245, depth: 0.200 },   // bas des côtes
-    { at: 0.88, width: 0.215, depth: 0.195 },   // haut de la cage thoracique
-    { at: 1.00, width: 0.145, depth: 0.145 },   // raccord au cou
+    { at: -0.14, width: 0.158, depth: 0.168 },   // entrejambe (sous le bassin)
+    { at: 0.00, width: 0.180, depth: 0.175 },    // sous le bassin
+    { at: 0.16, width: 0.205, depth: 0.205 },    // bassin / hanches (renforcé par le bombé)
+    { at: 0.45, width: 0.166, depth: 0.178 },    // taille
+    { at: 0.70, width: 0.238, depth: 0.196 },    // bas des côtes
+    { at: 0.86, width: 0.302, depth: 0.202 },    // haut du thorax
+    { at: 0.94, width: 0.330, depth: 0.192 },    // épaules
+    { at: 1.00, width: 0.150, depth: 0.150 },    // base du cou
   ];
-  // bombés anatomiques (gaussiennes le long du tronc) : hanches et épaules
   const TORSO_BUMPS = [
     { centre: 0.16, sigma: 0.15, scale: 1.05 },   // bassin
     { centre: 0.90, sigma: 0.10, scale: 0.93 },   // ceinture scapulaire
   ];
-  const TORSO_SLICES = 13;
+  const TORSO_SLICES = 19;
+  const TORSO_BAS = -0.12;                       // le tronc descend jusqu'à l'entrejambe
   const TORSO_RING = 14;
   // os remplacés par le tronc en rendu 3D (ischions : le bassin les englobe)
   const SKIP_IN_VOLUME = { hip_l: true, hip_r: true };
+  const JOINT_BALLS = [];                 // rotules à dessiner en plus des segments (aucune par défaut)
   const CAP_JOINTS = ["elbow_l", "elbow_r", "knee_l", "knee_r", "wrist_l", "wrist_r", "ankle_l", "ankle_r"];
 
   // Libellés du tableau de réglages (l'interface les affiche tels quels)
+  // Galbe de chaque segment (facteur appliqué au rayon de référence, 0 = milieu
+  // du parent, 1 = extrémité). Les profils sont normalisés : l'épaisseur réglée
+  // dans le tableau reste le diamètre moyen du segment.
+  const LIMB_PROFILE = {
+    spine: [[0, 1.0], [1, 1.0]],
+    chest: [[0, 1.0], [1, 1.0]],
+    neck: [[0, 1.04], [1, 0.88]],
+    head: [[0, 0.86], [0.5, 1.0], [1, 0.92]],
+    head_top: [[0, 1.0], [1, 0.8]],
+    shoulder_l: [[0, 0.98], [1, 0.9]], shoulder_r: [[0, 0.98], [1, 0.9]],
+    // bras : deltoïde puis biceps, affiné au coude
+    elbow_l: [[0, 0.62], [0.14, 1.34], [0.42, 1.26], [0.72, 1.0], [1, 0.72]],
+    elbow_r: [[0, 0.62], [0.14, 1.34], [0.42, 1.26], [0.72, 1.0], [1, 0.72]],
+    // avant-bras : galbe du rond pronateur, fin au poignet
+    wrist_l: [[0, 0.7], [0.18, 1.18], [0.5, 1.06], [0.85, 0.7], [1, 0.56]],
+    wrist_r: [[0, 0.7], [0.18, 1.18], [0.5, 1.06], [0.85, 0.7], [1, 0.56]],
+    // main : paume pleine puis doigts
+    hand_l: [[0, 0.9], [0.35, 1.06], [0.7, 0.94], [1, 0.6]],
+    hand_r: [[0, 0.9], [0.35, 1.06], [0.7, 0.94], [1, 0.6]],
+    hip_l: [[0, 1.0], [1, 0.78]], hip_r: [[0, 1.0], [1, 0.78]],
+    // cuisse : fessier puis quadriceps, genou fin
+    knee_l: [[0, 0.7], [0.14, 1.24], [0.46, 1.16], [0.78, 0.9], [1, 0.66]],
+    knee_r: [[0, 0.7], [0.14, 1.24], [0.46, 1.16], [0.78, 0.9], [1, 0.66]],
+    // jambe : mollet, cheville très fine
+    ankle_l: [[0, 0.72], [0.22, 1.22], [0.5, 1.04], [0.8, 0.68], [1, 0.5]],
+    ankle_r: [[0, 0.72], [0.22, 1.22], [0.5, 1.04], [0.8, 0.68], [1, 0.5]],
+    toe_l: [[0, 1.0], [0.6, 0.94], [1, 0.78]], toe_r: [[0, 1.0], [0.6, 0.94], [1, 0.78]],
+    heel_l: [[0, 1.0], [1, 0.88]], heel_r: [[0, 1.0], [1, 0.88]],
+  };
+  // normalisation : chaque profil a une moyenne de 1 (l'épaisseur réglée = diamètre moyen)
+  Object.keys(LIMB_PROFILE).forEach((k) => {
+    const prof = LIMB_PROFILE[k];
+    let somme = 0, span = 0;
+    for (let i = 0; i + 1 < prof.length; i++) {
+      const d = prof[i + 1][0] - prof[i][0];
+      somme += ((prof[i][1] + prof[i + 1][1]) / 2) * d;
+      span += d;
+    }
+    const moyenne = span > 0 ? somme / span : 1;
+    if (moyenne > 0) prof.forEach((point) => { point[1] /= moyenne; });
+  });
+
+  /** Facteur de galbe d'un segment à la fraction u (0 = parent, 1 = extrémité). */
+  function profileAt(child, u) {
+    const prof = LIMB_PROFILE[child];
+    if (!prof) return 1;
+    const x = Math.max(0, Math.min(1, u));
+    for (let i = 0; i + 1 < prof.length; i++) {
+      if (x >= prof[i][0] && x <= prof[i + 1][0]) {
+        const d = prof[i + 1][0] - prof[i][0] || 1;
+        const t = (x - prof[i][0]) / d;
+        return prof[i][1] + (prof[i + 1][1] - prof[i][1]) * t;
+      }
+    }
+    return prof[prof.length - 1][1];
+  }
+
   const SEGMENTS = [
     { bone: "spine", label: "Tronc — bas du dos (taille)", group: "Tronc" },
     { bone: "chest", label: "Tronc — poitrine", group: "Tronc" },
@@ -451,8 +511,14 @@
 
   // ------------------------------------------------------------------ rendu
   const COLORS = {
-    skin: [198, 193, 188], skin_dark: [168, 160, 154], bone: [92, 104, 255],
+    skin: [214, 176, 152],          // albédo de la peau (peau claire, mat)
+    skin_dark: [138, 100, 86],      // bords / ombres
+    under: [226, 128, 104],         // liseré chaud (lumière qui traverse la peau)
+    tendon: [242, 238, 232],        // élastiques et tendons
+    bone: [92, 104, 255],
   };
+  const SKIN_AMBIENT = 0.52, SKIN_DIFFUSE = 0.56, SKIN_SPEC = 0.22, SKIN_SHIN = 26;
+  const LIGHT = norm(v(-0.38, 0.82, 0.42));       // lumière de haut-gauche, légèrement devant
 
   function shade(rgb, factor) {
     return `rgb(${Math.max(0, Math.min(255, Math.round(rgb[0] * factor)))},` +
@@ -460,7 +526,32 @@
       `${Math.max(0, Math.min(255, Math.round(rgb[2] * factor)))})`;
   }
 
-  /** Dessine une capsule (segment épais à bouts ronds) entre deux projections. */
+  /**
+   * Couleur de la peau pour une normale unitaire 3D : Lambert + reflet + liseré chaud
+   * sur les bords (la lumière traverse un peu la peau, comme de la chair).
+   */
+  function skinFor(n, eye, out) {
+    const diff = Math.max(0, dot(n, LIGHT));
+    const hx = LIGHT.x + eye.x, hy = LIGHT.y + eye.y, hz = LIGHT.z + eye.z;
+    const hl = Math.sqrt(hx * hx + hy * hy + hz * hz) || 1;
+    const nh = Math.max(0, (n.x * hx + n.y * hy + n.z * hz) / hl);
+    const spec = Math.pow(nh, SKIN_SHIN) * SKIN_SPEC;
+    const face = Math.abs(dot(n, eye));                       // 1 = face à la caméra
+    const k = SKIN_AMBIENT + SKIN_DIFFUSE * diff;
+    const bord = Math.pow(1 - face, 2.2);                     // 1 = bord de silhouette
+    const sss = bord * 0.38;
+    out[0] = COLORS.skin[0] * k + COLORS.under[0] * sss + 255 * spec;
+    out[1] = COLORS.skin[1] * k + COLORS.under[1] * sss + 248 * spec;
+    out[2] = COLORS.skin[2] * k + COLORS.under[2] * sss + 242 * spec;
+    return out;
+  }
+
+  function skinCss(n, eye) {
+    const c = skinFor(n, eye, [0, 0, 0]);
+    return `rgb(${Math.min(255, Math.round(c[0]))},${Math.min(255, Math.round(c[1]))},${Math.min(255, Math.round(c[2]))})`;
+  }
+
+  /** Capsule simple (segments fins du mode filaire, ombres, rotules). */
   function capsule(ctx, a, b, r1, r2, fill) {
     const dx = b.x - a.x, dy = b.y - a.y;
     const l = Math.hypot(dx, dy);
@@ -480,6 +571,102 @@
     ctx.fill();
     ctx.restore();
     return Math.max(rA, rB);
+  }
+
+  /** Repère de vue : matrice de rotation + axe caméra (vers l'objectif). */
+  function viewOf(opts) {
+    const r = rotation(opts.yaw, opts.pitch);
+    return { r: r, eye: v(r[2][0], r[2][1], r[2][2]), opts: opts };
+  }
+
+  /** Direction écran (x vers la droite, y vers le bas) d'une direction 3D. */
+  function screenDir(view, dir) {
+    return [
+      dir.x * view.r[0][0] + dir.y * view.r[0][1] + dir.z * view.r[0][2],
+      -(dir.x * view.r[1][0] + dir.y * view.r[1][1] + dir.z * view.r[1][2]),
+    ];
+  }
+
+  /** Repère d'ombrage d'un segment : axes du plan perpendiculaire + axe caméra. */
+  function limbFrame(a3, b3, view, nx, ny) {
+    const w = norm(sub(b3, a3));
+    let u = norm(v(w.y * view.eye.z - w.z * view.eye.y, w.z * view.eye.x - w.x * view.eye.z,
+      w.x * view.eye.y - w.y * view.eye.x));
+    if (len(u) < 1e-6) u = v(1, 0, 0);
+    // l'axe « u » doit pointer du même côté que la perpendiculaire écran (nx, ny)
+    const sd = screenDir(view, u);
+    if (sd[0] * nx + sd[1] * ny < 0) u = mul(u, -1);
+    let z = norm(v(u.y * w.z - u.z * w.y, u.z * w.x - u.x * w.z, u.x * w.y - u.y * w.x));
+    if (dot(z, view.eye) < 0) z = mul(z, -1);
+    return { w: w, u: u, z: z };
+  }
+
+  /** Dégradé de peau d'un tube : échantillonne la normale tout autour du cylindre. */
+  function tubeGradient(ctx, a3, b3, view, nx, ny, rWorld) {
+    const frame = limbFrame(a3, b3, view, nx, ny);
+    const cx = (a3.x + b3.x) / 2, cy = (a3.y + b3.y) / 2;
+    const s = project({ x: cx, y: cy, z: cx === a3.x && cy === a3.y ? a3.z : (a3.z + b3.z) / 2 }, view.opts || {});
+    void s;
+    return { frame: frame, nx: nx, ny: ny };
+  }
+
+  /**
+   * Remplissage de peau d'un segment : dégradé perpendiculaire calculé sur la
+   * vraie normale 3D du cylindre (Lambert + reflet + liseré chaud).
+   */
+  function skinFill(ctx, a, b, a3, b3, view, rScreen) {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const l = Math.max(1e-6, Math.hypot(dx, dy));
+    const nx = -dy / l, ny = dx / l;
+    const frame = limbFrame(a3, b3, view, nx, ny);
+    const grad = ctx.createLinearGradient(a.x + nx * rScreen, a.y + ny * rScreen,
+      a.x - nx * rScreen, a.y - ny * rScreen);
+    const N = 10;
+    for (let i = 0; i <= N; i++) {
+      const s01 = i / N, th = Math.PI * s01;
+      const c = Math.cos(th), sn = Math.sin(th);
+      const nrm = v(frame.u.x * c + frame.z.x * sn, frame.u.y * c + frame.z.y * sn, frame.u.z * c + frame.z.z * sn);
+      grad.addColorStop(s01, skinCss(nrm, view.eye));
+    }
+    return grad;
+  }
+
+  /**
+   * Dessine un segment de chair : silhouette musclée (profil de rayon) + peau ombrée.
+   * `radiusAt(u)` donne le rayon (unités monde) à la fraction u du segment.
+   */
+  function limb(ctx, a, b, radiusAt, a3, b3, view, fill) {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const l = Math.max(1e-6, Math.hypot(dx, dy));
+    const nx = -dy / l, ny = dx / l;
+    const N = 16;
+    const gauche = [], droite = [];
+    for (let i = 0; i <= N; i++) {
+      const u = i / N;
+      const cx = a.x + dx * u, cy = a.y + dy * u;
+      const scale = a.scale + (b.scale - a.scale) * u;
+      const r = Math.max(1.2, radiusAt(u) * scale);
+      gauche.push([cx + nx * r, cy + ny * r]);
+      droite.push([cx - nx * r, cy - ny * r]);
+    }
+    const rFin = Math.max(1.2, radiusAt(1) * b.scale);
+    const rDeb = Math.max(1.2, radiusAt(0) * a.scale);
+    const remplissage = fill ? fill : skinFill(ctx, a, b, a3, b3, view, Math.max(rDeb, rFin));
+    ctx.beginPath();
+    gauche.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])));
+    ctx.arc(b.x, b.y, rFin, Math.atan2(ny, nx) - Math.PI / 2, Math.atan2(ny, nx) + Math.PI / 2);
+    for (let i = droite.length - 1; i >= 0; i--) ctx.lineTo(droite[i][0], droite[i][1]);
+    ctx.arc(a.x, a.y, rDeb, Math.atan2(ny, nx) + Math.PI / 2, Math.atan2(ny, nx) + 3 * Math.PI / 2);
+    ctx.closePath();
+    ctx.fillStyle = remplissage;
+    ctx.fill();
+    // calottes aux extrémités : bouchent le coin laissé par une articulation pliée
+    for (const [c, r] of [[a, rDeb], [b, rFin]]) {
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    return Math.max(rDeb, rFin);
   }
 
   // ------------------------------------------------------------- mannequin
@@ -787,63 +974,65 @@
     render(ctx, width, height, mode) {
       const m = mode || this.style;
       const opts = this.cameraOptions(width, height);
-      const draw = mode !== "silhouette" && mode !== "depth";
-      if (draw) this.drawScene(ctx, width, height, { ground: m === "volume" });
+      const view = viewOf(opts);
+      const drawFond = m !== "silhouette" && m !== "depth";
+      if (drawFond) this.drawScene(ctx, width, height, { ground: m === "volume" });
 
-      const radii = this.radii();
       const projected = {};
       for (const j of JOINTS) projected[j] = project(this.pose[j], opts);
 
-      // éléments : volumes rigides, rotules, puis os (triés du plus loin au plus proche)
-      const items = this.collectItems(m, projected, radii, opts);
-      const skip = (m === "volume") ? SKIP_IN_VOLUME : {};
-      BONES.forEach(([a, b], i) => {
-        if (skip[b] || !projected[a] || !projected[b]) return;
-        items.push({
-          type: "bone", a: projected[a], b: projected[b], r1: radii[i][0], r2: radii[i][1],
-          part: BONES[i][4], depth: (projected[a].depth + projected[b].depth) / 2,
-        });
+      const anatomique = (m === "volume" || m === "silhouette" || m === "depth");
+      const items = [];
+      if (anatomique) {
+        items.push(this.torsoItem(opts));
+        items.push(this.headItem(opts));
+        for (const cote of ["l", "r"]) items.push(this.footItem(cote, opts));
+      }
+      BONES.forEach(([a, b, , , part]) => {
+        const child = b;
+        if (anatomique && (SKIP_IN_VOLUME[child] || child === "spine" || child === "chest" ||
+          child === "shoulder_l" || child === "shoulder_r" ||
+          child === "head" || child === "head_top" ||
+          child === "nose" || child === "toe_l" || child === "toe_r" || child === "heel_l" || child === "heel_r")) return;
+        const pa = projected[a], pb = projected[b];
+        if (!pa || !pb) return;
+        items.push({ type: "bone", a: pa, b: pb, a3: this.pose[a], b3: this.pose[b], child: child,
+          part: part, r: this.meanRadius(child), depth: (pa.depth + pb.depth) / 2 });
       });
+      if (anatomique) {
+        // aucune rotule visible : le galbe des segments ferme les articulations tout seul
+        for (const j of JOINT_BALLS) {
+          items.push({ type: "joint", p: projected[j], r: this.jointRadius(j), depth: projected[j].depth - 0.005 });
+        }
+      }
       items.sort((p, q) => q.depth - p.depth);
 
       const depths = items.map((it) => it.depth);
       const dMin = Math.min.apply(null, depths), dMax = Math.max.apply(null, depths);
+      const gris = (d) => {
+        const t = dMax === dMin ? 0.5 : (d - dMin) / (dMax - dMin);
+        const g = Math.round(255 - 205 * t);
+        return `rgb(${g},${g},${g})`;
+      };
 
       for (const it of items) {
-        if (it.type === "torso") { this.drawTorso(ctx, it, m); continue; }
-        if (it.type === "cap") {
+        if (it.type === "torso") { this.drawTorso(ctx, it, m, view); continue; }
+        if (it.type === "head") { this.drawHead(ctx, it, m, view); continue; }
+        if (it.type === "foot") { this.drawFoot(ctx, it, m, view); continue; }
+        if (it.type === "joint") {
           const r = Math.max(1, it.r * it.p.scale);
-          if (m === "silhouette") ctx.fillStyle = "#ffffff";
-          else if (m === "depth") {
-            const t = dMax === dMin ? 0.5 : (it.depth - dMin) / (dMax - dMin);
-            const g = Math.round(255 - 205 * t);
-            ctx.fillStyle = `rgb(${g},${g},${g})`;
-          } else {
-            const grad = ctx.createLinearGradient(it.p.x - r, 0, it.p.x + r, 0);
-            grad.addColorStop(0, shade(COLORS.skin, 1.01));
-            grad.addColorStop(0.45, shade(COLORS.skin, 0.95));
-            grad.addColorStop(1, shade(COLORS.skin_dark, 0.94));
-            ctx.fillStyle = grad;
-          }
+          if (m === "silhouette") { ctx.fillStyle = "#ffffff"; }
+          else if (m === "depth") { ctx.fillStyle = gris(it.depth); }
+          else { ctx.fillStyle = this.jointFill(ctx, it.p, r, view); }
           ctx.beginPath();
           ctx.arc(it.p.x, it.p.y, r, 0, Math.PI * 2);
           ctx.fill();
           continue;
         }
-        if (m === "depth") {
-          const t = dMax === dMin ? 0.5 : (it.depth - dMin) / (dMax - dMin);
-          capsule(ctx, it.a, it.b, it.r1, it.r2,
-            `rgb(${Math.round(255 - 200 * t)},${Math.round(255 - 200 * t)},${Math.round(255 - 200 * t)})`);
-          continue;
-        }
-        if (m === "silhouette") {
-          capsule(ctx, it.a, it.b, it.r1, it.r2, "#ffffff");
-          continue;
-        }
         if (m === "wireframe") {
           ctx.save();
           ctx.strokeStyle = LIMB_COLOR[it.part] || "#8b93e8";
-          ctx.lineWidth = Math.max(2, it.r1 * it.a.scale * 1.2);
+          ctx.lineWidth = Math.max(2, it.r * it.a.scale * 2.1);
           ctx.lineCap = "round";
           ctx.beginPath();
           ctx.moveTo(it.a.x, it.a.y);
@@ -852,22 +1041,198 @@
           ctx.restore();
           continue;
         }
-        // volume : dégradé perpendiculaire à l'os (lumière venant du haut-gauche)
-        const dx = it.b.x - it.a.x, dy = it.b.y - it.a.y;
-        const l = Math.max(1, Math.hypot(dx, dy));
-        const nx = -dy / l, ny = dx / l;
-        const cx = (it.a.x + it.b.x) / 2, cy = (it.a.y + it.b.y) / 2;
-        const half = Math.max(it.r1 * it.a.scale, it.r2 * it.b.scale);
-        const depthT = dMax === dMin ? 0.5 : (it.depth - dMin) / (dMax - dMin);
-        const light = 0.98 + 0.10 * (1 - depthT);
-        const grad = ctx.createLinearGradient(cx + nx * half, cy + ny * half, cx - nx * half, cy - ny * half);
-        grad.addColorStop(0, shade(COLORS.skin, light * 1.04));
-        grad.addColorStop(0.45, shade(COLORS.skin, light * 0.95));
-        grad.addColorStop(1, shade(COLORS.skin_dark, light * 0.88));
-        capsule(ctx, it.a, it.b, it.r1, it.r2, grad);
+        const fill = m === "silhouette" ? "#ffffff" : (m === "depth" ? gris(it.depth) : null);
+        limb(ctx, it.a, it.b, (u) => it.r * profileAt(it.child, u), it.a3, it.b3, view, fill);
       }
       if ((m === "volume" || m === "wireframe") && this.showHandles !== false) this.drawHandles(ctx, projected, m);
       return projected;
+    }
+
+    /** Rotule ombrée : dégradé radial décalé vers la lumière. */
+    jointFill(ctx, p, r, view) {
+      const l = screenDir(view, LIGHT);
+      const ll = Math.hypot(l[0], l[1]) || 1;
+      const grad = ctx.createRadialGradient(p.x + (l[0] / ll) * r * 0.45, p.y + (l[1] / ll) * r * 0.45, r * 0.05,
+        p.x, p.y, r * 1.02);
+      grad.addColorStop(0, skinCss(this.melangeNormale(view, 0.85), view.eye));
+      grad.addColorStop(0.5, skinCss(this.melangeNormale(view, 0.25), view.eye));
+      grad.addColorStop(1, skinCss(this.melangeNormale(view, -0.35), view.eye));
+      return grad;
+    }
+
+    /** Normale mélangeant la direction caméra et la lumière (nuances des rotules). */
+    melangeNormale(view, k) {
+      const n = v(view.eye.x * (1 - k) + LIGHT.x * k, view.eye.y * (1 - k) + LIGHT.y * k, view.eye.z * (1 - k) + LIGHT.z * k);
+      return len(n) < 1e-6 ? view.eye : norm(n);
+    }
+
+    /** Dégradé de peau d'un anneau (ellipse) : normale vraie le long de la largeur. */
+    ringSkinFill(ctx, gauche, droite, centre, xAxis, zAxis, view) {
+      const sd = screenDir(view, xAxis);
+      const demi = Math.max(2, Math.abs(sd[0] * (droite.x - gauche.x) / 2) + Math.abs(sd[1] * (droite.x - gauche.x) / 2));
+      const grad = ctx.createLinearGradient(centre.x - sd[0] * demi, centre.y - sd[1] * demi,
+        centre.x + sd[0] * demi, centre.y + sd[1] * demi);
+      const N = 12;
+      for (let i = 0; i <= N; i++) {
+        const s01 = i / N, th = Math.PI * s01;
+        const c = Math.cos(th), sn = Math.sin(th);
+        const nrm = v(xAxis.x * c + zAxis.x * sn, xAxis.y * c + zAxis.y * sn, xAxis.z * c + zAxis.z * sn);
+        grad.addColorStop(s01, skinCss(nrm, view.eye));
+      }
+      return grad;
+    }
+
+    /** Dessine un volume d'anneaux (tronc, tête) ombré, avec repères anatomiques. */
+    fillRings(ctx, rings, mode, view, options) {
+      const o = options || {};
+      const points = [];
+      for (const r of rings) points.push(r.droite);
+      for (let i = rings.length - 1; i >= 0; i--) points.push(rings[i].gauche);
+      if (points.length < 3) return;
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (const p of points) {
+        minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+        minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+      }
+      if (mode === "silhouette") {
+        ctx.fillStyle = "#ffffff";
+        ctx.beginPath();
+        points.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+        ctx.closePath();
+        ctx.fill();
+      } else if (mode === "depth") {
+        const g = Math.round(255 - 205 * Math.max(0, Math.min(1, o.depthT === undefined ? 0.5 : o.depthT)));
+        ctx.fillStyle = `rgb(${g},${g},${g})`;
+        ctx.beginPath();
+        points.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        // ombrage par bandes : chaque anneau a sa propre normale (le volume tourne)
+        const ref = rings[Math.floor(rings.length / 2)];
+        for (let i = 0; i + 1 < rings.length; i++) {
+          const a = rings[i], b = rings[i + 1];
+          const milieu = { centre: { x: (a.centre.x + b.centre.x) / 2, y: (a.centre.y + b.centre.y) / 2 },
+            gauche: Math.abs(a.droite.x - a.gauche.x) > Math.abs(b.droite.x - b.gauche.x) ? a.gauche : b.gauche,
+            droite: Math.abs(a.droite.x - a.gauche.x) > Math.abs(b.droite.x - b.gauche.x) ? a.droite : b.droite };
+          ctx.beginPath();
+          ctx.moveTo(a.droite.x, a.droite.y);
+          ctx.lineTo(b.droite.x, b.droite.y);
+          ctx.lineTo(b.gauche.x, b.gauche.y);
+          ctx.lineTo(a.gauche.x, a.gauche.y);
+          ctx.closePath();
+          let axeX = a.x || v(1, 0, 0);
+          let axeZ = a.z || v(0, 0, 1);
+          if (ref && ref.x && dot(axeX, ref.x) < 0) axeX = mul(axeX, -1);
+          if (ref && ref.z && dot(axeZ, ref.z) < 0) axeZ = mul(axeZ, -1);
+          ctx.fillStyle = this.ringSkinFill(ctx, milieu.gauche, milieu.droite, milieu.centre, axeX, axeZ, view);
+          ctx.fill();
+        }
+      }
+      if (mode === "volume" && o.cues && o.surface && this.showAnatomy !== false) {
+        this.drawAnatomy(ctx, o.surface, view, o.cues);
+      }
+    }
+
+    /**
+     * Repères anatomiques : taches douces placées sur la vraie surface (f = hauteur,
+     * phi = angle autour du volume, 0 = flanc droit, π/2 = avant).
+     */
+    drawAnatomy(ctx, surface, view, cues) {
+      for (const cue of cues) {
+        const p3 = surface(cue.f, cue.phi);
+        if (!p3) continue;
+        const p = project(p3, view.opts);
+        if (!p || !isFinite(p.x)) continue;
+        const axe = screenDir(view, cue.axe || v(1, 0, 0));
+        const angle = Math.atan2(axe[1], axe[0]);
+        const rx = Math.max(1.5, (cue.rx || 0.03) * p.scale);
+        const ry = Math.max(1.2, (cue.ry || 0.02) * p.scale);
+        ctx.save();
+        ctx.globalAlpha = cue.alpha === undefined ? 0.12 : cue.alpha;
+        if (cue.flou === false) {
+          ctx.fillStyle = cue.clair ? "#fff6ef" : "#241611";
+        } else {
+          const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, Math.max(rx, ry));
+          grad.addColorStop(0, cue.clair ? "rgba(255,246,239,.95)" : "rgba(32,18,12,.85)");
+          grad.addColorStop(1, cue.clair ? "rgba(255,246,239,0)" : "rgba(32,18,12,0)");
+          ctx.fillStyle = grad;
+        }
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y, rx, ry, angle, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    /** Tête : volume d'anneaux + visage (yeux, nez, bouche, oreilles). */
+    drawHead(ctx, item, mode, view) {
+      const rings = item.rings.map((r) => {
+        const proj = r.pts.map((q) => project(q, view.opts));
+        let gauche = proj[0], droite = proj[0];
+        for (const q of proj) {
+          if (q.x < gauche.x) gauche = q;
+          if (q.x > droite.x) droite = q;
+        }
+        return { u: r.u, gauche: gauche, droite: droite, centre: project(r.centre, view.opts),
+          centre3: r.centre, x: item.frame.x, z: item.frame.z };
+      });
+      this.fillRings(ctx, rings, mode, view, {
+        depthT: 0.5,
+        cues: [{ f: 0.62, x: 0, y: 0, largeur: 0.3, ratio: 0.2, alpha: 0.10 },
+          { f: 0.30, x: 0, y: 0, largeur: 0.26, ratio: 0.16, alpha: 0.10 }],
+      });
+      if (mode !== "volume" || this.showFace === false) return;
+      // visage : yeux, nez, bouche, oreilles placés sur la surface de la tête
+      const fr = item.frame;
+      const surface = (u, phi) => {
+        const r = this.headProfile(u);
+        const centre = add(add(fr.bas, mul(fr.axis, fr.longueur * (u * 0.96 - 0.10))),
+          mul(fr.z, fr.profondeur * this.headFace(u)));
+        return add(centre, add(mul(fr.x, Math.cos(phi) * fr.largeur / 2 * r * 1.02),
+          mul(fr.z, Math.sin(phi) * fr.profondeur / 2 * r)));
+      };
+      const tache = (p3, rx, ry, couleur, alpha) => {
+        const p = project(p3, view.opts);
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = couleur;
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y, Math.max(1, rx * p.scale), Math.max(1, ry * p.scale), 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      };
+      // yeux (un peu enfoncés dans l'orbite)
+      const yeux = 0.60;
+      for (const cote of [1, -1]) {
+        tache(surface(yeux, Math.PI / 2 + cote * 0.42), fr.largeur * 0.10, fr.largeur * 0.052, "#4a3229", 0.5);
+        tache(surface(yeux + 0.05, Math.PI / 2 + cote * 0.42), fr.largeur * 0.13, fr.largeur * 0.04, "#2b1a14", 0.12);
+      }
+      // nez : arête claire puis narines
+      const nezHaut = surface(0.62, Math.PI / 2), nezBas = surface(0.47, Math.PI / 2);
+      tache(surface(0.55, Math.PI / 2), fr.largeur * 0.075, fr.largeur * 0.115, "#fff2e8", 0.30);
+      tache(add(nezHaut, v(0, 0, 0)), fr.largeur * 0.02, fr.largeur * 0.02, "#c9a48f", 0.25);
+      void nezBas;
+      // bouche et menton
+      tache(surface(0.34, Math.PI / 2), fr.largeur * 0.13, fr.largeur * 0.035, "#6d3f34", 0.42);
+      tache(surface(0.20, Math.PI / 2), fr.largeur * 0.10, fr.largeur * 0.05, "#ffe7d8", 0.18);
+      // oreilles
+      for (const cote of [1, -1]) {
+        tache(surface(0.55, cote * 0.02), fr.largeur * 0.045, fr.largeur * 0.085, "#d3a98f", 0.85);
+      }
+    }
+
+    /** Pied : talon et avant-pied, aplatis (semelle au sol). */
+    drawFoot(ctx, item, mode, view) {
+      const g = mode === "depth"
+        ? (() => { const t = Math.max(0, Math.min(1, (item.depth - (this.camera.distance - 0.7)) / 1.4));
+          const v0 = Math.round(255 - 205 * (1 - t)); return `rgb(${v0},${v0},${v0})`; })()
+        : null;
+      const blanc = mode === "silhouette";
+      const talon = (u) => item.rTal * (1 - 0.12 * u);
+      const avant = (u) => item.rAvant * (1 - 0.30 * u) + item.rPointe * 0.30 * u;
+      limb(ctx, item.a, item.b, talon, item.a3, item.b3, view, blanc ? "#ffffff" : g);
+      limb(ctx, item.b, item.c, avant, item.b3, item.c3, view, blanc ? "#ffffff" : g);
     }
 
     // -------------------------------------------------------------- tronc
@@ -881,7 +1246,7 @@
       while (i < weights.length - 1 && reste > weights[i]) { reste -= weights[i]; i++; }
       const t = weights[i] > 0 ? Math.max(0, Math.min(1, reste / weights[i])) : 0;
       const A = this.pose[chain[i]], B = this.pose[chain[i + 1]];
-      const centre = lerp(A, B, t);
+      let centre = lerp(A, B, t);
       const axis = norm(sub(B, A));
       // largeur : des hanches (en bas) aux épaules (en haut)
       const bas = norm(sub(this.pose.hip_l, this.pose.hip_r));
@@ -890,6 +1255,10 @@
       x = norm(sub(x, mul(axis, dot(x, axis))));
       if (len(x) < 1e-6) x = norm(sub(this.pose.hip_l, this.pose.hip_r));
       const z = norm(v(x.y * axis.z - x.z * axis.y, x.z * axis.x - x.x * axis.z, x.x * axis.y - x.y * axis.x));
+      if (f < 0) {
+        // sous le bassin : le tronc descend vers l'entrejambe (sinon trou entre les cuisses)
+        centre = sub(centre, mul(axis, -f * (weights[0] + weights[1])));
+      }
       return { centre: centre, axis: axis, x: x, z: z };
     }
 
@@ -912,6 +1281,12 @@
         const g = Math.exp(-Math.pow((f - bump.centre) / bump.sigma, 2));
         width = Math.max(width, refs[i] * bump.scale * Math.max(0.12, g));
       });
+      if (f < 0) {
+        // sous le bassin : on referme doucement vers l'entrejambe
+        const k = Math.max(0, Math.min(1, (0 - f) / 0.14));
+        const ferme = 1 - 0.42 * k;
+        return { width: width * ferme, depth: interp("depth") * girth * ferme };
+      }
       const retrecissement = 1 - 0.25 * Math.max(0, Math.min(1, (f - 0.95) / 0.05));
       return { width: width * retrecissement, depth: interp("depth") * girth * retrecissement };
     }
@@ -926,14 +1301,14 @@
         pts.push(add(frame.centre, add(mul(frame.x, Math.cos(th) * taille.width / 2),
           mul(frame.z, Math.sin(th) * taille.depth / 2))));
       }
-      return { pts: pts, centre: frame.centre, size: taille };
+      return { pts: pts, centre: frame.centre, size: taille, frame: frame };
     }
 
     /** Élément « tronc » à dessiner (silhouette lissée + profondeur moyenne). */
     torsoItem(opts) {
       const rings = [];
       for (let i = 0; i < TORSO_SLICES; i++) {
-        const f = i / (TORSO_SLICES - 1);
+        const f = TORSO_BAS + (i / (TORSO_SLICES - 1)) * (1 - TORSO_BAS);
         const ring = this.torsoRing(f);
         const proj = ring.pts.map((p) => project(p, opts));
         let gauche = proj[0], droite = proj[0];
@@ -941,55 +1316,156 @@
           if (p.x < gauche.x) gauche = p;
           if (p.x > droite.x) droite = p;
         }
-        rings.push({ f: f, proj: proj, gauche: gauche, droite: droite, centre: project(ring.centre, opts) });
+        rings.push({ f: f, proj: proj, gauche: gauche, droite: droite, centre: project(ring.centre, opts),
+          centre3: ring.centre, x: ring.frame.x, z: ring.frame.z });
       }
+      const self = this;
+      const surface = (f, phi) => {
+        const frame = self.torsoFrame(f);
+        const taille = self.torsoSize(f);
+        return add(frame.centre, add(mul(frame.x, Math.cos(phi) * taille.width / 2),
+          mul(frame.z, Math.sin(phi) * taille.depth / 2)));
+      };
       const depth = rings.reduce((acc, r) => acc + r.centre.depth, 0) / rings.length;
-      return { type: "torso", rings: rings, depth: depth };
+      return { type: "torso", rings: rings, depth: depth, surface: surface };
     }
 
-    /** Dessine le tronc : silhouette (chaîne gauche + chaîne droite) remplie et ombrée. */
-    drawTorso(ctx, item, mode) {
-      const points = [];
-      for (const r of item.rings) points.push(r.droite);
-      for (let i = item.rings.length - 1; i >= 0; i--) points.push(item.rings[i].gauche);
-      if (points.length < 3) return;
-      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-      for (const p of points) {
-        minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
-        minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+    /** Dessine le tronc : volume lissé, peau ombrée et repères anatomiques. */
+    drawTorso(ctx, item, mode, view) {
+      this.fillRings(ctx, item.rings, mode, view, {
+        depthT: Math.max(0, Math.min(1, (item.depth - (this.camera.distance - 0.7)) / 1.4)),
+        surface: item.surface,
+        cues: [
+          { f: 0.90, phi: 0.55, rx: 0.055, ry: 0.020, alpha: 0.045, clair: true },  // dessus d'épaule
+          { f: 0.90, phi: 2.59, rx: 0.055, ry: 0.020, alpha: 0.045, clair: true },
+          { f: 0.755, phi: 1.10, rx: 0.042, ry: 0.030, alpha: 0.05 },               // pectoral
+          { f: 0.755, phi: 2.04, rx: 0.042, ry: 0.030, alpha: 0.05 },
+          { f: 0.50, phi: 1.57, rx: 0.013, ry: 0.011, alpha: 0.26, flou: false },   // nombril
+          { f: 0.26, phi: 4.71, rx: 0.055, ry: 0.024, alpha: 0.07 },                // pli fessier
+        ],
+      });
+    }
+
+    /** Rayon moyen (mètres) d'un segment : la moitié de l'épaisseur réglée dans le tableau. */
+    meanRadius(child) {
+      const t = this.thickness[child];
+      if (t) return t / 2;
+      return BASE_THICK[child] ? BASE_THICK[child] / 2 : 0.04;
+    }
+
+    /** Rayon de la rotule d'une articulation : celui des tubes qui s'y raccordent. */
+    jointRadius(joint) {
+      let r = 0.02;
+      BONES.forEach(([a, b]) => {
+        const child = b;
+        if (child === joint) r = Math.max(r, this.meanRadius(child) * profileAt(child, 0));
+        if (a === joint && PARENT[child] === a) r = Math.max(r, this.meanRadius(child) * profileAt(child, 1));
+      });
+      // une articulation de la racine (épaule, hanche) prend aussi l'épaisseur du membre enfant
+      BONES.forEach(([a, b]) => {
+        if (a === joint) r = Math.max(r, this.meanRadius(b) * profileAt(b, 0) * 0.92);
+      });
+      if (joint === "hip_l" || joint === "hip_r") r = Math.min(r, 0.052);
+      if (joint === "shoulder_l" || joint === "shoulder_r") r = Math.min(r, 0.046);
+      if (joint === "elbow_l" || joint === "elbow_r" || joint === "knee_l" || joint === "knee_r") r *= 0.94;
+      return r;
+    }
+
+    /** Repère de la tête : axe crâne→sommets, largeur et profondeur réglées. */
+    headFrame() {
+      const bas = this.pose.neck, haut = this.pose.head_top;
+      const axis = norm(sub(haut, bas));
+      const epaules = norm(sub(this.pose.shoulder_l, this.pose.shoulder_r));
+      let x = norm(sub(epaules, mul(axis, dot(epaules, axis))));
+      if (len(x) < 1e-6) x = v(1, 0, 0);
+      let z = norm(v(x.y * axis.z - x.z * axis.y, x.z * axis.x - x.x * axis.z, x.x * axis.y - x.y * axis.x));
+      const front = this.pose.nose ? norm(sub(this.pose.nose, bas)) : z;
+      if (dot(z, front) < 0) z = mul(z, -1);
+      return { bas: bas, haut: haut, axis: axis, x: x, z: z,
+        longueur: dist(bas, haut), largeur: this.thickness.head || 0.176, profondeur: (this.thickness.head || 0.176) * 1.18 };
+    }
+
+    /**
+     * Galbe de la tête : 0 = menton, 1 = sommet. Crâne arrondi, mâchoire plus
+     * étroite et menton légèrement en avant.
+     */
+    headProfile(u) {
+      const prof = [[0, 0.26], [0.06, 0.46], [0.14, 0.62], [0.26, 0.80], [0.40, 0.92],
+        [0.56, 0.99], [0.72, 1.0], [0.85, 0.94], [0.94, 0.78], [1, 0.40]];
+      for (let i = 0; i + 1 < prof.length; i++) {
+        if (u >= prof[i][0] && u <= prof[i + 1][0]) {
+          const d = prof[i + 1][0] - prof[i][0] || 1;
+          const t = (u - prof[i][0]) / d;
+          return prof[i][1] + (prof[i + 1][1] - prof[i][1]) * t;
+        }
       }
-      ctx.beginPath();
-      points.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-      ctx.closePath();
-      if (mode === "silhouette") {
-        ctx.fillStyle = "#ffffff";
-      } else if (mode === "depth") {
-        const t = Math.max(0, Math.min(1, (item.depth - (this.camera.distance - 0.7)) / 1.4));
-        const g = Math.round(255 - 205 * (1 - t));
-        ctx.fillStyle = `rgb(${g},${g},${g})`;
-      } else {
-        // lumière venue de la gauche : dégradé horizontal + léger modelé vertical
-        const grad = ctx.createLinearGradient(minX, 0, maxX, 0);
-        grad.addColorStop(0, shade(COLORS.skin, 1.02));
-        grad.addColorStop(0.42, shade(COLORS.skin, 0.97));
-        grad.addColorStop(1, shade(COLORS.skin_dark, 0.92));
-        ctx.fillStyle = grad;
+      return 0.40;
+    }
+
+    /** Avancée du menton / du visage (fraction de la profondeur) selon la hauteur. */
+    headFace(u) {
+      return 0.16 * Math.exp(-Math.pow((u - 0.22) / 0.20, 2))
+        + 0.10 * Math.exp(-Math.pow((u - 0.48) / 0.30, 2));
+    }
+
+    /** Élément « tête » : anneaux 3D du menton au sommet. */
+    headItem(opts) {
+      const fr = this.headFrame();
+      const rings = [];
+      const n = 11;
+      for (let i = 0; i < n; i++) {
+        const u = i / (n - 1);
+        const centre = add(add(fr.bas, mul(fr.axis, fr.longueur * (u * 0.96 - 0.10))),
+          mul(fr.z, fr.profondeur * this.headFace(u)));
+        const r = this.headProfile(u);
+        const pts = [];
+        for (let k = 0; k < 12; k++) {
+          const th = (k / 12) * Math.PI * 2;
+          pts.push(add(centre, add(mul(fr.x, Math.cos(th) * fr.largeur / 2 * r * 1.02),
+            mul(fr.z, Math.sin(th) * fr.profondeur / 2 * r))));
+        }
+        rings.push({ u: u, pts: pts, centre: centre });
       }
-      ctx.fill();
-      if (mode === "volume") {
-        // ceinture un peu marquée (taille) + ombre sous les côtes : lecture anatomique
-        const waist = item.rings.reduce((a, r) => (Math.abs(r.f - 0.45) < Math.abs(a.f - 0.45) ? r : a), item.rings[0]);
-        const cotes = item.rings.reduce((a, r) => (Math.abs(r.f - 0.72) < Math.abs(a.f - 0.72) ? r : a), item.rings[0]);
-        ctx.save();
-        ctx.strokeStyle = "rgba(0,0,0,.10)";
-        ctx.lineWidth = Math.max(2, waist.centre.scale * 0.02);
-        ctx.beginPath();
-        ctx.moveTo(waist.gauche.x, waist.gauche.y);
-        ctx.lineTo(waist.droite.x, waist.droite.y);
-        ctx.stroke();
-        ctx.restore();
-        void cotes;
-      }
+      return { type: "head", rings: rings, frame: fr,
+        depth: project(fr.bas, opts).depth - 0.01 };
+    }
+
+    /** Élément « pied » : talon + orteils (deux tubes galbés). */
+    footItem(cote, opts) {
+      const ankle = this.pose["ankle_" + cote], toe = this.pose["toe_" + cote], heel = this.pose["heel_" + cote];
+      const sol = 0.012;
+      const bas = v(ankle.x, sol, ankle.z);
+      const basT = v(toe.x, sol + 0.004, toe.z);
+      const basH = v(heel.x, sol + 0.002, heel.z);
+      const cheville = this.thickness["ankle_" + cote] || 0.102;
+      const doigts = this.thickness["toe_" + cote] || 0.08;
+      const cote3 = cheville * 0.44;
+      const lame = doigts * 0.46;
+      const proj = (q) => project(q, opts);
+      return { type: "foot", a3: basH, b3: bas, c3: basT, rTal: cote3 * 1.02, rAvant: cote3 * 0.98,
+        rPointe: lame * 0.95, a: proj(basH), b: proj(bas), c: proj(basT),
+        depth: Math.max(proj(bas).depth, proj(basT).depth) + 0.01 };
+    }
+
+    /** Ancien tracé (non utilisé) : conservé pour référence des versions précédentes. */
+    footItemLegacy(cote, opts) {
+      const ankle = this.pose["ankle_" + cote], toe = this.pose["toe_" + cote], heel = this.pose["heel_" + cote];
+      const axe = norm(sub(toe, ankle));
+      const cote3 = this.thickness["ankle_" + cote] || 0.102;
+      const larg = (this.thickness["toe_" + cote] || 0.08) * 1.25;
+      const frame = { x: norm(v(axe.y * 0 - axe.z * 1, 0, axe.x * 1 - axe.y * 0)) };
+      void frame;
+      const sol = 0.012;
+      const bas = v(ankle.x, sol, ankle.z);
+      const basT = v(toe.x, sol, toe.z);
+      const basH = v(heel.x, sol, heel.z);
+      const hautT = add(toe, mul(norm(sub(ankle, toe)), cote3 * 0.35));
+      const hautH = add(heel, mul(norm(sub(ankle, heel)), cote3 * 0.42));
+      const points = [basH, bas, basT, hautT, add(ankle, v(0, cote3 * 0.15, 0)), hautH];
+      const proj = points.map((q) => project(q, opts));
+      const projAnkle = project(ankle, opts);
+      return { type: "foot", pts: proj, largeur: larg, ankle: projAnkle, a3: ankle, b3: toe,
+        depth: (projAnkle.depth + project(toe, opts).depth) / 2 };
     }
 
     /** Rotule (sphère) à une articulation : évite les découpes entre deux segments. */
