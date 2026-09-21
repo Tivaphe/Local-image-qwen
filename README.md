@@ -272,3 +272,33 @@ python run.py --host 0.0.0.0 --port 7860
 Code de cette application : MIT. Les modèles ont leur propre licence (Qwen Research License pour Qwen‑Image‑2.1,
 FLUX Non‑Commercial License pour FLUX.2 klein 9B, Apache‑2.0 pour FLUX.2 klein 4B,
 CreativeML OpenRAIL‑M pour SD 1.5 et les ControlNet de lllyasviel).
+
+## Mannequin anatomique (maillage libre de droits)
+
+En plus du mannequin dessiné à la main, l'application embarque un **vrai corps** issu
+du maillage anatomique **MakeHuman**, publié en **CC0 1.0** (base mesh, cibles de
+morphologie et squelette avec poids de peau). Aucune attribution n'est requise ; la
+provenance est rappelée dans `app/assets/mannequin/LISEZ-MOI.md`.
+
+- **Morphologies** : femme, homme, neutre, fine, athlétique, forte.
+- **Mensurations** : tours de taille, hanches, poitrine, cuisses, mollets, bras,
+  poignets, cou, largeur d'épaules, ventre, fessiers… chaque curseur est une
+  *cible de morphologie* appliquée au maillage.
+- **Poses** : sept poses types (debout, bras levés, marche, assis, accroupi, saut,
+  salut) et surtout des **angles par articulation** (flexion, abduction, torsion),
+  bornés par des **butées anatomiques** — un coude ne se plie pas à l'envers, un
+  genou ne part pas vers l'avant.
+- **Peau pondérée** : chaque sommet suit plusieurs os, les articulations
+  s'arrondissent au lieu de casser.
+- **Rendus** : volumes ombrés (peau lisse), squelette OpenPose, profondeur,
+  silhouette — utilisables tels quels comme image de contrôle.
+
+Régénérer les assets (facultatif, ils sont versionnés) :
+
+```bash
+git clone --depth 1 https://github.com/makehumancommunity/makehuman /tmp/makehuman
+python tools/build_mannequin_assets.py /tmp/makehuman/makehuman/data
+```
+
+API : `GET /api/mannequin/model`, `POST /api/mannequin/mesh/pose`,
+`POST /api/mannequin/mesh/render`.

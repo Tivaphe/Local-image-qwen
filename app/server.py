@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import backend, config, downloads, generator, mannequin, pose
+from . import backend, config, downloads, generator, mannequin, mannequin_mesh, pose
 from .catalog import (
     CATEGORIES,
     DEFAULT_FAMILY,
@@ -114,6 +114,9 @@ def status():
         "control": {
             "types": list(generator.CONTROL_TYPES),
             "mannequin": {"modes": list(mannequin.MODES), "default_size": [768, 1024]},
+            "mannequin_mesh": {"disponible": (mannequin_mesh.ASSETS / "maillage.npz").exists(),
+                               "morphologies": list(mannequin_mesh.MORPHOLOGIES),
+                               "poses": list(mannequin_mesh.POSES)},
             "pose": pose.available(),
             "pose_models": pose_models(),
             "pose_model_present": bool(pose_detectors),
@@ -404,6 +407,66 @@ def mannequin_pose(m: MannequinIn):
             "lengths": {k: round(v, 4) for k, v in mannequin.bone_lengths(build).items()},
             "points": mannequin.openpose_points(m.model_dump(), max(256, m.width), max(256, m.height)),
             "modes": list(mannequin.MODES)}
+
+
+# ------------------------------------------------- mannequin anatomique (maillage)
+class MannequinMeshIn(BaseModel):
+    """Requête du mannequin anatomique : morphologie + angles d'articulation."""
+    pose: dict = {}              # {articulation: [flexion, abduction, torsion]} en degrés
+    morphology: str = ""         # neutre | femme | homme | fine | athletique | forte
+    morphs: dict = {}            # poids bruts des cibles de morphologie (curseurs fins)
+    origine: list = []           # décalage du bassin (assis, accroupi) en mètres
+    yaw: float | None = None     # orientation de la caméra (radians)
+    pitch: float | None = None
+    mode: str = "volume"         # volume | openpose | depth | silhouette
+    width: int = 768
+    height: int = 1024
+
+
+@app.get("/api/mannequin/model")
+def mannequin_model():
+    """Catalogue du mannequin anatomique : morphologies, poses, articulations et butées."""
+    return {
+        "ok": True,
+        "morphologies": mannequin_mesh.MORPHOLOGIES,
+        "poses": {nom: angles for nom, angles in mannequin_mesh.POSES.items()},
+        "poses_origine": mannequin_mesh.POSES_ORIGINE,
+        "articulations": [
+            {"nom": nom, "etiquette": mannequin_mesh.ETIQUETTES[nom],
+             "parent": mannequin_mesh.PARENT.get(nom),
+             "limites": mannequin_mesh.LIMITES[nom]}
+            for nom in mannequin_mesh.ORDRE
+        ],
+        "modes": ["volume", "openpose", "depth", "silhouette"],
+        "dimensions": mannequin_mesh.dimensions(),
+    }
+
+
+@app.post("/api/mannequin/mesh/pose")
+def mannequin_mesh_pose(m: MannequinMeshIn):
+    """Positions des 21 articulations pour une pose donnée (poignées de l'éditeur)."""
+    try:
+        points = mannequin_mesh.articulations(m.pose or None, origine=m.origine or None)
+    except mannequin_mesh.MannequinError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "articulations": points, "etiquettes": mannequin_mesh.ETIQUETTES,
+            "limites": mannequin_mesh.LIMITES}
+
+
+@app.post("/api/mannequin/mesh/render")
+def mannequin_mesh_render(m: MannequinMeshIn):
+    """Rend le mannequin anatomique (volumes, squelette OpenPose, profondeur, silhouette)."""
+    donnees = m.model_dump()
+    width, height = max(128, m.width // 32 * 32), max(128, m.height // 32 * 32)
+    try:
+        img = mannequin_mesh.rend(donnees, m.mode, width, height)
+    except mannequin_mesh.MannequinError as e:
+        raise HTTPException(400, str(e))
+    name = f"{uuid.uuid4().hex}-mannequin-{m.mode}.png"
+    pose.save_image(img, CONTROLS_DIR / name)
+    return {"ok": True, "mode": m.mode, "kind": "pose" if m.mode == "openpose" else m.mode,
+            "control": {"id": f"controls/{name}", "url": _control_url(name),
+                        "width": int(width), "height": int(height)}}
 
 
 # -------------------------------------------------------------- generation
