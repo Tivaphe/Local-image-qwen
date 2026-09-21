@@ -12,7 +12,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import backend, config, downloads, generator
-from .catalog import CATEGORIES, DEFAULT_FAMILY, FAMILIES, MODEL_EXTENSIONS
+from .catalog import (
+    CATEGORIES,
+    DEFAULT_FAMILY,
+    DEFAULT_TIER,
+    FAMILIES,
+    MODEL_EXTENSIONS,
+    TIER_LABELS,
+    TIERS,
+    bundle_status,
+)
 from .paths import MODELS_DIR, OUTPUTS_DIR, STATIC_DIR, UPLOADS_DIR, ensure_dirs, model_dir
 
 ensure_dirs()
@@ -59,11 +68,19 @@ def status():
             "edit_ready": (not FAMILIES[f]["edit_requires_vision"]) or bool(cfg["selections"][f].get("vision"))}
         for f in FAMILIES
     }
+    # téléchargement « modèle complet » en un clic : état de chaque bundle
+    bundles = {
+        f: {t: bundle_status(f, t, {c: [m["name"] for m in local[f][c]] for c in CATEGORIES}) for t in TIERS}
+        for f in FAMILIES
+    }
     return {
         "engine": backend.installed_info(),
         "models": local,
         "families": [{k: v for k, v in FAMILIES[f].items()} for f in FAMILIES],
         "families_status": families_status,
+        "bundles": bundles,
+        "tiers": [{"id": t, "label": TIER_LABELS[t]} for t in TIERS],
+        "default_tier": DEFAULT_TIER,
         "config": cfg,
         "ready": ready and backend.find_binary() is not None,
         "edit_ready": families_status[fam]["edit_ready"],
@@ -113,6 +130,22 @@ class DownloadIn(BaseModel):
 def download(d: DownloadIn):
     try:
         jid = downloads.start_model_download(d.family, d.category, d.file_id, d.url)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"job": jid}
+
+
+class BundleIn(BaseModel):
+    family: str
+    tier: str = DEFAULT_TIER
+    include_vision: Optional[bool] = None
+
+
+@app.post("/api/download/bundle")
+def download_bundle(b: BundleIn):
+    """Télécharge un modèle complet en un clic (tous les fichiers nécessaires)."""
+    try:
+        jid = downloads.start_bundle_download(b.family, b.tier, b.include_vision)
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"job": jid}

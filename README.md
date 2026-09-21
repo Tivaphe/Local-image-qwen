@@ -14,7 +14,9 @@ Modèles pris en charge (sélectionnables dans un menu déroulant) :
 Les trois font de la génération **et** de l'édition d'image (image(s) de référence + instruction).
 
 - Zéro dépendance lourde : pas de PyTorch, pas de CUDA toolkit à installer.
-- Le moteur (binaire précompilé) et les modèles se téléchargent **en un clic depuis l'interface**.
+- Le moteur (binaire précompilé) **et les modèles se téléchargent en un clic depuis l'interface** :
+  un bouton par modèle télécharge d'un coup la diffusion, l'encodeur de texte, la VAE
+  (et l'encodeur de vision pour l'édition d'image), avec le niveau de qualité de votre choix.
 - Texte → image et **édition d'image** (image(s) de référence + instruction).
 - Galerie avec seed, réglages, réutilisation en un clic.
 - Fonctionne sous **Windows / Linux / macOS**, GPU NVIDIA (CUDA), AMD (ROCm/Vulkan), Intel (Vulkan) ou CPU.
@@ -36,9 +38,20 @@ Linux/macOS :                 ./start.sh
 Le navigateur s'ouvre sur `http://127.0.0.1:7860`. Puis, dans l'onglet **Configuration** :
 
 1. **Moteur** → « Installer » (la variante est détectée automatiquement : `cuda` pour NVIDIA, sinon `vulkan`).
-2. **Modèles** → déplier le modèle voulu et cliquer « Télécharger » sur les fichiers *recommandés*
-   (diffusion + encodeur de texte + VAE ; pour Qwen‑Image‑2.1 ajoutez le mmproj si vous voulez l'édition d'image).
+2. **Télécharger un modèle** → choisissez le modèle (Qwen‑Image‑2.1, FLUX.2 klein 9B ou FLUX.2 klein 4B),
+   le niveau de qualité, puis « ⬇ Télécharger ». Tous les fichiers nécessaires partent en même temps
+   et la progression s'affiche ; les fichiers déjà présents sont ignorés, donc un téléchargement
+   interrompu se relance et reprend là où il en était.
 3. Revenir dans **Générer**, choisir le modèle dans le menu, écrire un prompt, cliquer **Générer**.
+
+Le téléchargement est aussi accessible depuis l'onglet **Générer** (bandeau sous le menu des modèles),
+et fichier par fichier dans « Fichiers de modèles — détail » pour choisir une quantification précise.
+
+| Qualité | Qwen‑Image‑2.1 | FLUX.2 klein 9B | FLUX.2 klein 4B |
+|---|---|---|---|
+| Léger (GPU 6–8 Go / CPU) | 9,7 Go | 10,1 Go | 5,0 Go |
+| Équilibré (GPU 12–16 Go) | 11,1 Go | 13,2 Go | 6,3 Go |
+| Qualité max (GPU ≥ 16 Go) | 18,2 Go | 19,0 Go | 8,9 Go |
 
 ## Dossiers
 
@@ -73,7 +86,9 @@ Les réglages par défaut (étapes, CFG, sampler) sont appliqués automatiquemen
 FLUX.2 klein est distillé : gardez CFG = 1 et 4 étapes (jusqu'à 8 pour un peu plus de finesse).
 Dimensions toujours arrondies au multiple de 32.
 
-Tailles indicatives des installations recommandées : Qwen‑Image‑2.1 ≈ 11 Go · FLUX.2 klein 4B ≈ 9 Go · FLUX.2 klein 9B ≈ 13 Go.
+Tailles indicatives (qualité « Équilibré », encodeur de vision compris pour Qwen‑Image‑2.1) :
+Qwen‑Image‑2.1 ≈ 11 Go · FLUX.2 klein 4B ≈ 6,3 Go · FLUX.2 klein 9B ≈ 13 Go.
+Voir le tableau des qualités ci-dessus pour les autres niveaux.
 
 ## Accès depuis un autre appareil du réseau local
 
@@ -88,8 +103,23 @@ python run.py --host 0.0.0.0 --port 7860
   (sous Windows avec NVIDIA prenez `sd-…-win-cuda12-x64.zip` **et** `cudart-sd-bin-win-cu12-x64.zip`).
 - **Manque de mémoire (CUDA out of memory)** : activer *VAE tiling*, réduire la résolution, ou ajouter `--max-vram 14` dans *Arguments supplémentaires*.
 - **Très lent** : vérifier que la variante `cuda` (et non `cpu`/`vulkan`) est installée, et que *flash attention* est cochée.
-- **Édition d'image refusée** : téléchargez l'encodeur de vision (mmproj).
+- **Édition d'image refusée** : téléchargez l'encodeur de vision (mmproj) — la case
+  « Inclure l'édition d'image » de l'encadré de téléchargement le prévoit.
+- **Téléchargement interrompu / coupure réseau** : relancez simplement « ⬇ Télécharger » sur le même
+  modèle : les fichiers déjà complets sont ignorés et le fichier en cours reprend là où il s'est arrêté.
 - Le journal complet de `sd-cli` est visible sous la barre de progression.
+
+## Tests
+
+```text
+pip install pytest httpx
+python -m pytest tests -q
+```
+
+Les tests vérifient le catalogue (chaque bundle « modèle complet » pointe vers des fichiers qui
+existent vraiment), le téléchargement réel d'un modèle entier via un serveur HTTP local
+(fichiers écrits dans `models/<modèle>/<catégorie>/`, progression, reprise, erreurs, espace disque)
+et l'API (`/api/status`, `/api/download/bundle`).
 
 ## Licence
 

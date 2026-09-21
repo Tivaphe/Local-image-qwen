@@ -17,8 +17,13 @@ const CAT_LABELS = {
   lora: "LoRA (optionnel)",
 };
 const SELECTABLE = ["diffusion", "text_encoder", "vae", "vision"];
+const CAT_SHORT = { diffusion: "Diffusion", text_encoder: "Encodeur texte", vae: "VAE", vision: "Vision (édition)" };
 const postJSON = (url, body) => api(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 const famById = (id) => STATUS.families.find((f) => f.id === id);
+const bundleRunning = (famId) => STATUS.jobs.find((j) => j.kind === "bundle" && j.family === famId && j.status === "running");
+// choix de l'utilisateur conservés entre deux rafraîchissements (le DOM est reconstruit toutes les 2 s)
+const TIER_CHOICE = {};
+const VISION_CHOICE = {};
 
 // ------------------------------------------------------------- onglets
 function showTab(name) {
@@ -68,6 +73,8 @@ async function refreshStatus() {
   $("#extra").value = c.extra_args || "";
 
   renderEngine();
+  renderBundles();
+  renderQuickDl();
   renderModels();
   renderJobs();
   renderGeneration(STATUS.generation);
@@ -85,11 +92,110 @@ function renderEngine() {
   }
 }
 
+// ------------------------------------------- téléchargement d'un modèle entier
+async function downloadBundle(famId) {
+  const tier = TIER_CHOICE[famId] || STATUS.default_tier;
+  const body = { family: famId, tier };
+  if (famById(famId).edit_requires_vision) body.include_vision = VISION_CHOICE[famId] !== false;
+  try {
+    await postJSON("/api/download/bundle", body);
+  } catch (e) {
+    alert(e.message);
+  }
+  refreshStatus();
+}
+
+function renderBundles() {
+  const root = $("#bundleCards");
+  if (!root) return;
+  root.innerHTML = "";
+
+  for (const fam of STATUS.families) {
+    const st = STATUS.families_status[fam.id];
+    const tiers = STATUS.bundles[fam.id];
+    const tier = TIER_CHOICE[fam.id] || STATUS.default_tier;
+    const b = tiers[tier] || tiers[STATUS.default_tier];
+    const job = bundleRunning(fam.id);
+    const active = STATUS.config.family === fam.id;
+
+    const card = document.createElement("div");
+    card.className = "bundle" + (st.ready ? " ready" : "");
+    card.innerHTML = `
+      <div class="bhead"><h4>${fam.name}</h4>
+        <span class="st ${st.ready ? "ok" : "ko"}">${st.ready ? "✔ installé" : `${b.missing.length}/${b.files.length} à télécharger`}</span></div>
+      <div class="bdesc">${fam.description}</div>
+      <label>Qualité
+        <select class="tierSel">${STATUS.tiers.map((t) =>
+          `<option value="${t.id}" ${t.id === tier ? "selected" : ""}>${t.label} — ${tiers[t.id].total_gb} Go</option>`).join("")}</select>
+      </label>
+      ${fam.edit_requires_vision ? `<label class="check"><input type="checkbox" class="visSel" ${VISION_CHOICE[fam.id] !== false ? "checked" : ""}>
+        Inclure l'édition d'image (encodeur de vision)</label>` : ""}
+      <div class="bfiles">${b.files.map((f) => `<div><span>${CAT_SHORT[f.category]} — ${f.id}</span>
+        <span class="${f.present ? "have" : ""}">${f.present ? "✔ présent" : `${f.size_gb} Go`}</span></div>`).join("")}</div>`;
+
+    card.querySelector(".tierSel").onchange = (e) => { TIER_CHOICE[fam.id] = e.target.value; renderBundles(); };
+    const vis = card.querySelector(".visSel");
+    if (vis) vis.onchange = (e) => { VISION_CHOICE[fam.id] = e.target.checked; renderBundles(); };
+
+    if (job) {
+      const pct = job.total ? (100 * job.done) / job.total : 0;
+      card.insertAdjacentHTML("beforeend", `
+        <div class="bbar"><div class="row small"><span>${job.message || "…"}</span><span>${fmtGb(job.done)} / ${fmtGb(job.total)}</span></div>
+        <div class="bar"><div style="width:${pct}%"></div></div></div>`);
+      const busy = document.createElement("button");
+      busy.className = "primary";
+      busy.disabled = true;
+      busy.textContent = `⏳ Téléchargement… ${pct.toFixed(0)} %`;
+      card.appendChild(busy);
+    } else {
+      const btn = document.createElement("button");
+      btn.className = "primary";
+      btn.textContent = !b.missing.length ? "⬇ Tout est présent — relancer / autre qualité"
+        : st.ready ? `⬇ Ajouter cette qualité (${b.missing_gb} Go)`
+        : `⬇ Télécharger ${fam.name} (${b.missing_gb} Go)`;
+      btn.onclick = () => downloadBundle(fam.id);
+      card.appendChild(btn);
+    }
+    if (st.ready && !active) {
+      const use = document.createElement("button");
+      use.className = "ghost";
+      use.style.marginTop = "6px";
+      use.textContent = "✔ Utiliser ce modèle";
+      use.onclick = async () => {
+        await postJSON("/api/config", { family: fam.id });
+        const d = fam.defaults;
+        $("#steps").value = d.steps; $("#stepsVal").textContent = d.steps;
+        $("#cfg").value = d.cfg_scale; $("#cfgVal").textContent = Number(d.cfg_scale).toFixed(1);
+        $("#sampler").value = d.sampler;
+        await refreshStatus();
+        showTab("generate");
+      };
+      card.appendChild(use);
+    }
+    root.appendChild(card);
+  }
+}
+
+function renderQuickDl() {
+  const box = $("#quickDl");
+  if (!box) return;
+  const famId = STATUS.config.family;
+  const st = STATUS.families_status[famId];
+  const b = STATUS.bundles[famId][TIER_CHOICE[famId] || STATUS.default_tier];
+  const hidden = !!st.ready || !!bundleRunning(famId);
+  box.classList.toggle("hidden", hidden);
+  if (hidden) return;
+  $("#quickDlName").textContent = famById(famId).name;
+  $("#quickDlSize").textContent = `${b.missing_gb} Go`;
+}
+
 function renderModels() {
   $("#diskFree").textContent = `— ${STATUS.disk_free_gb} Go libres sur le disque`;
   const root = $("#modelSections");
+  // toutes les familles sont dépliées au premier affichage : les boutons « Télécharger » sont visibles d'emblée
+  const first = !root.children.length;
   const openFams = new Set([...root.querySelectorAll("details.fam[open]")].map((d) => d.dataset.fam));
-  if (!root.children.length) openFams.add(STATUS.config.family);
+  if (first) STATUS.families.forEach((f) => openFams.add(f.id));
   root.innerHTML = "";
   const runningJobs = new Set(STATUS.jobs.filter((j) => j.status === "running").map((j) => j.label));
 
@@ -102,6 +208,16 @@ function renderModels() {
       <div class="body"></div>`;
     const body = det.querySelector(".body");
     const sel = STATUS.config.selections[fam.id];
+
+    // raccourci : tout le modèle d'un coup
+    const binfo = STATUS.bundles[fam.id][TIER_CHOICE[fam.id] || STATUS.default_tier];
+    const bjob = bundleRunning(fam.id);
+    const quick = document.createElement("div");
+    quick.className = "mrow";
+    quick.innerHTML = `<span class="name"><b>Modèle complet</b> — ${binfo.files.length} fichiers (${binfo.total_gb} Go)</span>
+      <button class="primary" ${bjob ? "disabled" : ""}>${bjob ? "⏳ en cours" : "⬇ Télécharger le modèle"}</button>`;
+    quick.querySelector("button").onclick = () => downloadBundle(fam.id);
+    body.appendChild(quick);
 
     for (const cat of ["diffusion", "text_encoder", "vae", "vision", "lora"]) {
       const local = STATUS.models[fam.id][cat] || [];
@@ -172,8 +288,12 @@ function renderJobs() {
   root.innerHTML = STATUS.jobs.map((j) => {
     const pct = j.total ? (100 * j.done / j.total) : 0;
     const icon = j.status === "done" ? "✅" : j.status === "error" ? "❌" : "⏳";
+    const files = (j.files || []).length
+      ? `<div class="files">${j.files.map((f) => `<div class="f"><span>${f.id}</span>
+          <span>${f.status === "done" ? "✔" : f.status === "error" ? "✖" : f.status === "running" ? `${(100 * f.done / (f.total || 1)).toFixed(0)} %` : "en attente"}</span></div>`).join("")}</div>`
+      : "";
     return `<div class="job">${icon} <b>${j.label}</b> — ${j.total ? `${fmtGb(j.done)} / ${fmtGb(j.total)} (${pct.toFixed(0)} %)` : j.message || ""}
-      ${j.status === "running" ? `<div class="bar"><div style="width:${pct}%"></div></div>` : `<div class="small">${j.message}</div>`}</div>`;
+      ${j.status === "running" ? `<div class="bar"><div style="width:${pct}%"></div></div>` : `<div class="small">${j.message}</div>`}${files}</div>`;
   }).join("");
 }
 
@@ -300,6 +420,10 @@ $("#lightbox").onclick = () => $("#lightbox").classList.add("hidden");
 $("#btnEngine").onclick = async () => {
   await postJSON("/api/engine/install", { flavor: $("#flavor").value });
   refreshStatus();
+};
+$("#btnQuickDl").onclick = async () => {
+  await downloadBundle(STATUS.config.family);
+  showTab("setup");
 };
 $("#btnSavePerf").onclick = async () => {
   await postJSON("/api/config", {

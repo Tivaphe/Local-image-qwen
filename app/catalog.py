@@ -4,9 +4,27 @@ Familles de modèles supportées et catalogue de fichiers téléchargeables en u
 Chaque famille a ses propres dossiers : models/<famille>/{diffusion,text_encoder,vae,vision,lora}
 Tout fichier .gguf / .safetensors déposé manuellement dans ces dossiers est détecté
 automatiquement, même s'il n'est pas listé ici (variantes, fine-tunes, autres quantifications…).
+
+Chaque famille déclare aussi des « bundles » : pour un niveau de qualité donné
+(light / balanced / quality), la liste exacte des fichiers qui composent le modèle
+complet. C'est ce qui permet le téléchargement d'un modèle entier en un clic.
 """
 
 HF = "https://huggingface.co"
+
+# ------------------------------------------------------------ niveaux de qualité
+TIERS = ("light", "balanced", "quality")
+DEFAULT_TIER = "balanced"
+TIER_LABELS = {
+    "light": "Léger (GPU 6–8 Go / CPU)",
+    "balanced": "Équilibré (GPU 12–16 Go)",
+    "quality": "Qualité max (GPU ≥ 16 Go)",
+}
+TIER_SHORT = {"light": "Léger", "balanced": "Équilibré", "quality": "Qualité max"}
+
+# catégories qui composent un modèle complet, dans l'ordre de téléchargement
+BUNDLE_CATEGORIES = ("diffusion", "text_encoder", "vae", "vision")
+REQUIRED_CATEGORIES = ("diffusion", "text_encoder", "vae")
 
 
 def _f(repo: str, path: str, size_gb: float, label: str, recommended: bool = False) -> dict:
@@ -45,6 +63,26 @@ QWEN_IMAGE_21 = {
     "vae": [
         _f("Comfy-Org/Qwen-Image-2.1", "vae/qwen_image_2.1_vae_bf16.safetensors", 0.68, "VAE Qwen‑Image‑2.1 bf16", True),
     ],
+    "bundles": {
+        "light": {
+            "diffusion": "qwen_image_2.1-Q3_K.gguf",
+            "text_encoder": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "vision": "mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf",
+            "vae": "qwen_image_2.1_vae_bf16.safetensors",
+        },
+        "balanced": {
+            "diffusion": "qwen_image_2.1-Q4_K.gguf",
+            "text_encoder": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "vision": "mmproj-Qwen3VL-8B-Instruct-F16.gguf",
+            "vae": "qwen_image_2.1_vae_bf16.safetensors",
+        },
+        "quality": {
+            "diffusion": "qwen_image_2.1-Q8_0.gguf",
+            "text_encoder": "Qwen3VL-8B-Instruct-Q8_0.gguf",
+            "vision": "mmproj-Qwen3VL-8B-Instruct-F16.gguf",
+            "vae": "qwen_image_2.1_vae_bf16.safetensors",
+        },
+    },
 }
 
 # ------------------------------------------------------------ FLUX.2 klein
@@ -58,19 +96,36 @@ FLUX2_KLEIN_4B = {
     "edit_requires_vision": False,
     "diffusion": [
         _f("unsloth/FLUX.2-klein-4B-GGUF", "flux-2-klein-4b-Q3_K_M.gguf", 2.12, "Q3_K_M — léger"),
-        _f("unsloth/FLUX.2-klein-4B-GGUF", "flux-2-klein-4b-Q4_K_M.gguf", 2.6, "Q4_K_M"),
+        _f("unsloth/FLUX.2-klein-4B-GGUF", "flux-2-klein-4b-Q4_K_M.gguf", 2.6, "Q4_K_M — bon équilibre", True),
         _f("unsloth/FLUX.2-klein-4B-GGUF", "flux-2-klein-4b-Q5_K_M.gguf", 3.07, "Q5_K_M"),
         _f("unsloth/FLUX.2-klein-4B-GGUF", "flux-2-klein-4b-Q6_K.gguf", 3.41, "Q6_K"),
-        _f("unsloth/FLUX.2-klein-4B-GGUF", "flux-2-klein-4b-Q8_0.gguf", 4.3, "Q8_0 — quasi sans perte", True),
+        _f("unsloth/FLUX.2-klein-4B-GGUF", "flux-2-klein-4b-Q8_0.gguf", 4.3, "Q8_0 — quasi sans perte"),
         _f("unsloth/FLUX.2-klein-4B-GGUF", "flux-2-klein-4b-BF16.gguf", 7.75, "BF16 — original"),
     ],
     "text_encoder": [
         _f("unsloth/Qwen3-4B-GGUF", "Qwen3-4B-Q4_K_M.gguf", 2.5, "Qwen3‑4B Q4_K_M"),
-        _f("unsloth/Qwen3-4B-GGUF", "Qwen3-4B-Q6_K.gguf", 3.31, "Qwen3‑4B Q6_K"),
-        _f("unsloth/Qwen3-4B-GGUF", "Qwen3-4B-Q8_0.gguf", 4.28, "Qwen3‑4B Q8_0", True),
+        _f("unsloth/Qwen3-4B-GGUF", "Qwen3-4B-Q6_K.gguf", 3.31, "Qwen3‑4B Q6_K", True),
+        _f("unsloth/Qwen3-4B-GGUF", "Qwen3-4B-Q8_0.gguf", 4.28, "Qwen3‑4B Q8_0"),
     ],
     "vision": [],
     "vae": FLUX2_VAE,
+    "bundles": {
+        "light": {
+            "diffusion": "flux-2-klein-4b-Q3_K_M.gguf",
+            "text_encoder": "Qwen3-4B-Q4_K_M.gguf",
+            "vae": "flux2-vae.safetensors",
+        },
+        "balanced": {
+            "diffusion": "flux-2-klein-4b-Q4_K_M.gguf",
+            "text_encoder": "Qwen3-4B-Q6_K.gguf",
+            "vae": "flux2-vae.safetensors",
+        },
+        "quality": {
+            "diffusion": "flux-2-klein-4b-Q8_0.gguf",
+            "text_encoder": "Qwen3-4B-Q8_0.gguf",
+            "vae": "flux2-vae.safetensors",
+        },
+    },
 }
 
 FLUX2_KLEIN_9B = {
@@ -93,9 +148,83 @@ FLUX2_KLEIN_9B = {
     ],
     "vision": [],
     "vae": FLUX2_VAE,
+    "bundles": {
+        "light": {
+            "diffusion": "flux-2-klein-9b-Q3_K_M.gguf",
+            "text_encoder": "Qwen3-8B-Q4_K_M.gguf",
+            "vae": "flux2-vae.safetensors",
+        },
+        "balanced": {
+            "diffusion": "flux-2-klein-9b-Q6_K.gguf",
+            "text_encoder": "Qwen3-8B-Q4_K_M.gguf",
+            "vae": "flux2-vae.safetensors",
+        },
+        "quality": {
+            "diffusion": "flux-2-klein-9b-Q8_0.gguf",
+            "text_encoder": "Qwen3-8B-Q8_0.gguf",
+            "vae": "flux2-vae.safetensors",
+        },
+    },
 }
 
 FAMILIES = {f["id"]: f for f in (QWEN_IMAGE_21, FLUX2_KLEIN_4B, FLUX2_KLEIN_9B)}
 DEFAULT_FAMILY = "qwen_image_2.1"
 CATEGORIES = ("diffusion", "text_encoder", "vae", "vision", "lora")
 MODEL_EXTENSIONS = (".gguf", ".safetensors")
+
+
+# ------------------------------------------------------------------- bundles
+def _entry(family: str, category: str, file_id: str) -> dict:
+    for e in FAMILIES[family].get(category, []):
+        if e["id"] == file_id:
+            return e
+    raise ValueError(f"{family} : « {file_id} » est absent du catalogue ({category})")
+
+
+def bundle_plan(family: str, tier: str = DEFAULT_TIER, include_vision: bool | None = None) -> list[dict]:
+    """Liste ordonnée des fichiers qui composent le modèle complet, pour un niveau de qualité.
+
+    include_vision=None → suit `edit_requires_vision` de la famille
+    (l'encodeur de vision ne sert qu'à l'édition d'image).
+    """
+    fam = FAMILIES.get(family)
+    if fam is None:
+        raise ValueError(f"modèle inconnu : {family}")
+    if tier not in TIERS:
+        raise ValueError(f"qualité inconnue : {tier}")
+    if include_vision is None:
+        include_vision = bool(fam.get("edit_requires_vision"))
+
+    plan: list[dict] = []
+    for cat in BUNDLE_CATEGORIES:
+        if cat == "vision" and not include_vision:
+            continue
+        file_id = fam.get("bundles", {}).get(tier, {}).get(cat)
+        if not file_id:
+            continue
+        e = _entry(family, cat, file_id)
+        plan.append({
+            "category": cat, "id": e["id"], "url": e["url"], "label": e["label"],
+            "size_gb": e["size_gb"], "size_bytes": int(round(e["size_gb"] * 1e9)),
+        })
+
+    missing = [c for c in REQUIRED_CATEGORIES if not any(p["category"] == c for p in plan)]
+    if missing:
+        raise ValueError(f"{family} : bundle « {tier} » incomplet ({', '.join(missing)})")
+    return plan
+
+
+def bundle_status(family: str, tier: str, have: dict[str, list[str]], include_vision: bool | None = None) -> dict:
+    """Résumé d'un bundle : fichiers, taille totale, ce qui manque déjà présent ou non."""
+    plan = bundle_plan(family, tier, include_vision=include_vision)
+    files = []
+    for p in plan:
+        present = p["id"] in (have.get(p["category"]) or [])
+        files.append({"category": p["category"], "id": p["id"], "size_gb": p["size_gb"], "present": present})
+    return {
+        "files": files,
+        "total_gb": round(sum(p["size_gb"] for p in plan), 2),
+        "missing": [f for f in files if not f["present"]],
+        "missing_gb": round(sum(f["size_gb"] for f in files if not f["present"]), 2),
+        "complete": all(f["present"] for f in files),
+    }

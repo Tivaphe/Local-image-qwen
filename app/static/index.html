@@ -29,6 +29,10 @@
         <select id="family"></select>
       </label>
       <p class="hint" id="familyDesc"></p>
+      <div id="quickDl" class="notice hidden">
+        <b id="quickDlName">Ce modèle</b> n'est pas encore téléchargé (<span id="quickDlSize"></span>).
+        <button id="btnQuickDl" class="primary">⬇ Télécharger ce modèle</button>
+      </div>
 
       <label>Prompt (description de l'image)
         <textarea id="prompt" rows="5" placeholder="Ex : un chat roux tenant une pancarte « Bonjour », lumière douce, photo réaliste"></textarea>
@@ -127,13 +131,24 @@
   </div>
 
   <div class="card">
-    <div class="card-title">2. Modèles <span class="small" id="diskFree"></span></div>
-    <p class="hint">Pour chaque modèle, cliquez « Télécharger » sur les fichiers marqués <b>recommandé</b>. Tout fichier <code>.gguf</code>/<code>.safetensors</code> copié manuellement dans <code>models/&lt;modèle&gt;/&lt;catégorie&gt;/</code> apparaît automatiquement — y compris vos propres variantes (fine‑tunes, autres quantifications) du modèle de diffusion, sélectionnables par le bouton radio.</p>
+    <div class="card-title">2. Télécharger un modèle <span class="small" id="diskFree"></span></div>
+    <p class="hint">Un seul clic télécharge <b>tous</b> les fichiers du modèle : diffusion + encodeur de texte + VAE
+      (+ encodeur de vision pour l'édition d'image). Le téléchargement reprend où il s'est arrêté :
+      les fichiers déjà présents sont ignorés.</p>
+    <div id="bundleCards" class="bundles"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">3. Fichiers de modèles — détail <span class="small">(avancé)</span></div>
+    <p class="hint">Pour choisir vous-même une quantification, cliquez « Télécharger » sur un fichier précis.
+      Tout fichier <code>.gguf</code>/<code>.safetensors</code> copié manuellement dans
+      <code>models/&lt;modèle&gt;/&lt;catégorie&gt;/</code> apparaît automatiquement — y compris vos propres
+      variantes (fine‑tunes, autres quantifications) du modèle de diffusion, sélectionnables par le bouton radio.</p>
     <div id="modelSections"></div>
   </div>
 
   <div class="card">
-    <div class="card-title">3. Performance</div>
+    <div class="card-title">4. Performance</div>
     <label class="check"><input type="checkbox" id="offload"> Décharger les poids en RAM (<code>--offload-to-cpu</code>) — recommandé si ≤ 16 Go de VRAM</label>
     <label class="check"><input type="checkbox" id="fa"> Flash attention (<code>--diffusion-fa</code>) — plus rapide et moins de VRAM sur CUDA</label>
     <label class="check"><input type="checkbox" id="vaetiling"> VAE tiling (<code>--vae-tiling</code>) — pour les grandes images si manque de mémoire</label>
