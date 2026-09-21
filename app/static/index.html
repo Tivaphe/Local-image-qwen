@@ -11,18 +11,28 @@
   <div class="brand">🖼️ <b>Local Image Qwen</b> <span class="sub">Qwen‑Image‑2.1 · FLUX.2 klein · GGUF · 100 % local</span></div>
   <nav>
     <button data-tab="generate" class="active">Générer</button>
+    <button data-tab="models">Modèles <span id="modelsBadge" class="badge hidden">!</span></button>
     <button data-tab="gallery">Galerie</button>
-    <button data-tab="setup">Configuration <span id="setupBadge" class="badge hidden">!</span></button>
+    <button data-tab="setup">Configuration</button>
   </nav>
 </header>
 
 <main>
+<div id="renderError" class="notice error hidden"></div>
+
 <!-- ============================== GÉNÉRER ============================== -->
 <section id="tab-generate" class="tab active">
   <div class="cols">
     <div class="col-left">
+      <div class="modes">
+        <button id="modeGen" class="seg active">🎨 Générer une image</button>
+        <button id="modeEdit" class="seg">✏️ Éditer une image</button>
+      </div>
+
       <div id="notReady" class="notice hidden">
-        ⚠️ L'application n'est pas encore prête. Allez dans <a href="#" data-goto="setup">Configuration</a> pour installer le moteur et télécharger les modèles.
+        ⚠️ L'application n'est pas encore prête.
+        <button class="link" data-goto="models">Ouvrir l'onglet Modèles</button> pour installer le moteur et
+        télécharger un modèle en un clic (génération + édition d'image).
       </div>
 
       <label>Modèle
@@ -30,7 +40,7 @@
       </label>
       <p class="hint" id="familyDesc"></p>
 
-      <label>Prompt (description de l'image)
+      <label>Prompt (description de l'image, ou instruction de modification en édition)
         <textarea id="prompt" rows="5" placeholder="Ex : un chat roux tenant une pancarte « Bonjour », lumière douce, photo réaliste"></textarea>
       </label>
 
@@ -39,14 +49,225 @@
         <textarea id="negative" rows="2" placeholder="flou, basse qualité, texte illisible…"></textarea>
       </details>
 
-      <div class="card">
-        <div class="card-title">Édition d'image (optionnel)</div>
-        <p class="hint">Ajoutez une ou plusieurs images de référence et décrivez la modification dans le prompt (ex : « change la couleur du ciel en rose »). État pour ce modèle : <span id="editStatus">?</span>.</p>
+      <div class="card" id="editCard">
+        <div class="card-title">✏️ Édition d'image — images de référence</div>
+        <p class="hint">Ajoutez une ou plusieurs images de référence puis décrivez la modification dans le prompt
+          (ex : « change la couleur du ciel en rose »). État pour ce modèle : <span id="editStatus">?</span></p>
+        <p class="hint" id="editInfo"></p>
+        <div id="editFix" class="hidden">
+          <button class="primary" id="btnFixEdit">⬇ Télécharger l'encodeur de vision (édition)</button>
+        </div>
         <input type="file" id="refs" accept="image/*" multiple>
         <div id="refPreview" class="refs"></div>
       </div>
 
-      <div class="grid2">
+      <div class="card" id="poseCard">
+        <div class="card-title">🧍 Personnages, pose et composition (ControlNet)</div>
+        <div id="controlUnsupported" class="notice hidden"></div>
+        <div id="controlBody">
+          <div class="grid2">
+            <label>Type de contrôle
+              <select id="controlType">
+                <option value="">Aucun</option>
+                <option value="pose">Pose des personnages (squelette)</option>
+                <option value="canny">Contours / composition (Canny)</option>
+              </select>
+            </label>
+            <label>Force du contrôle <span class="val" id="controlStrengthVal">0.90</span>
+              <input type="range" id="controlStrength" min="0" max="1.5" step="0.05" value="0.9">
+            </label>
+          </div>
+          <p class="hint" id="controlHint">Détectez automatiquement les personnages d'une photo, ajustez leur squelette,
+            puis lancez la génération : la pose est conservée pendant que le prompt change l'apparence, la tenue ou le décor.</p>
+
+          <div class="row wrap">
+            <label class="check" id="controlSourceWrap">Source
+              <select id="controlSource" style="width:auto">
+                <option value="ref">Image de référence (ajoutée plus haut)</option>
+                <option value="file">Autre fichier…</option>
+                <option value="result">Dernière image générée</option>
+              </select>
+            </label>
+            <input type="file" id="controlFile" accept="image/*" class="hidden">
+            <button id="btnDetect" class="primary">🔍 Détecter les personnages</button>
+            <button id="btnReference" class="ghost hidden">🖼️ Choisir un squelette de référence…</button>
+            <button id="btnControlClear" class="ghost">✖ Retirer le contrôle</button>
+          </div>
+          <input type="file" id="referencePose" accept="image/*" class="hidden">
+          <div id="controlMissing" class="notice hidden"></div>
+          <div id="controlStatus" class="small"></div>
+
+          <div id="poseEditor" class="hidden">
+            <div class="row">
+              <span class="small">Faites glisser les articulations pour ajuster la pose (les points déplacés passent en surbrillance).</span>
+              <span>
+                <button class="ghost" id="btnPoseReset">↺ Réinitialiser</button>
+                <button class="ghost" id="btnPoseHide">▾ Masquer l'éditeur</button>
+              </span>
+            </div>
+            <canvas id="poseCanvas" width="480" height="480"></canvas>
+            <div class="small" id="poseEditorInfo"></div>
+          </div>
+
+          <div class="grid2" id="controlPreviewWrap">
+            <div>
+              <div class="small">Image de contrôle envoyée au modèle</div>
+              <img id="controlPreview" class="control-preview" alt="">
+            </div>
+            <div>
+              <div class="small">Référence utilisée</div>
+              <img id="controlSourcePreview" class="control-preview" alt="">
+            </div>
+          </div>
+
+          <div class="grid2" id="controlInitWrap">
+            <label class="check"><input type="checkbox" id="useInit"> Repartir de la photo (img2img) : garde les couleurs,
+              l'identité et le décor, en suivant le prompt</label>
+            <label>Force img2img <span class="val" id="strengthVal">0.45</span>
+              <input type="range" id="strength" min="0.05" max="1" step="0.05" value="0.45">
+            </label>
+          </div>
+        </div>
+      </div>
+
+
+      <div class="card" id="mannequinCard">
+        <div class="card-title">🤸 Mannequin articulé — poser un personnage à la main</div>
+        <p class="hint">Faites glisser les articulations : les os gardent leurs longueurs (coudes et genoux se plient
+          comme sur un vrai pantin), on ne peut donc pas déformer le corps. Rien à télécharger : tout est dessiné par
+          l'application, puis exporté en image de contrôle (ControlNet) ou en image de référence (Qwen‑Image, FLUX.2 klein).</p>
+
+        <div class="grid3">
+          <label>Rendu
+            <select id="mqStyle">
+              <option value="volume">3D ombré</option>
+              <option value="wireframe">2D filaire</option>
+            </select>
+          </label>
+          <label>Pose type
+            <select id="mqPreset">
+              <option value="debout">Debout</option>
+              <option value="marche">Marche</option>
+              <option value="course">Course</option>
+              <option value="assis">Assis</option>
+              <option value="accroupi">Accroupi</option>
+              <option value="danse">Danse</option>
+              <option value="main_levee">Main levée</option>
+            </select>
+          </label>
+          <label>Point réglable
+            <select id="mqJoint"></select>
+          </label>
+        </div>
+
+        <canvas id="mqCanvas" width="560" height="720" class="mannequin-canvas" title="Glissez une articulation pour la poser"></canvas>
+        <div class="row wrap">
+          <span class="small">Glissez à vide pour tourner la vue · molette pour zoomer · glissez un point pour poser ·
+            flèches du clavier pour déplacer le point sélectionné.</span>
+        </div>
+        <div class="row wrap">
+          <button class="ghost" id="btnMqUndo">↶ Annuler</button>
+          <button class="ghost" id="btnMqMirror">⇄ Miroir</button>
+          <button class="ghost" id="btnMqFront">Face</button>
+          <button class="ghost" id="btnMqSide">Profil</button>
+          <button class="ghost" id="btnMqFit">⤢ Recadrer</button>
+          <span class="small" id="mqInfo"></span>
+        </div>
+
+        <label>Avancer / reculer le point sélectionné <span class="val" id="mqDepthVal">0</span>
+          <input type="range" id="mqDepth" min="-100" max="100" step="1" value="0">
+        </label>
+
+        <details id="mqBuildBox" open>
+          <summary>📐 Tableau des dimensions (chaque segment du corps)</summary>
+          <p class="hint">Modifiez une valeur : le mannequin garde ces dimensions exactes, quelle que soit la pose.
+            « Longueur » est la taille de l'os, « épaisseur » son diamètre au milieu (en cm).</p>
+          <div class="row wrap">
+            <label class="check">Morphologie de départ
+              <select id="mqMorphology" style="width:auto">
+                <option value="neutre">Neutre (corps standard)</option>
+                <option value="fin">Fine</option>
+                <option value="athletique">Athlétique</option>
+                <option value="fort">Forte</option>
+                <option value="femme">Féminine</option>
+                <option value="homme">Masculine</option>
+              </select>
+            </label>
+            <label class="check"><input type="checkbox" id="mqSymmetry" checked> Appliquer aux deux côtés (gauche = droite)</label>
+            <button class="ghost" id="btnMqReset">↺ Dimensions par défaut</button>
+            <span class="small" id="mqSizeInfo"></span>
+          </div>
+          <div class="mq-table-wrap">
+            <table class="mq-table" id="mqTable">
+              <thead>
+                <tr><th>Segment</th><th>Longueur (cm)</th><th>Épaisseur (cm)</th><th></th></tr>
+              </thead>
+              <tbody id="mqTableBody"></tbody>
+            </table>
+          </div>
+        </details>
+
+        <div class="grid2">
+          <label>Image à produire
+            <select id="mqOutput">
+              <option value="openpose">Squelette OpenPose — pour ControlNet (pose exacte)</option>
+              <option value="volume" selected>Mannequin ombré — image de référence (Qwen‑Image, FLUX.2 klein)</option>
+              <option value="wireframe">Mannequin filaire — contours nets</option>
+              <option value="depth">Carte de profondeur</option>
+              <option value="silhouette">Silhouette (masque)</option>
+            </select>
+          </label>
+          <label>Résolution
+            <select id="mqSize">
+              <option value="512x768">512×768 (portrait)</option>
+              <option value="768x512">768×512 (paysage)</option>
+              <option value="768x768">768×768 (carré)</option>
+              <option value="768x1024" selected>768×1024 (portrait HD)</option>
+              <option value="1024x768">1024×768 (paysage HD)</option>
+              <option value="1024x1024">1024×1024 (carré HD)</option>
+            </select>
+          </label>
+        </div>
+        <div class="row wrap">
+          <button class="ghost" id="btnMqPreview">👁️ Aperçu du rendu</button>
+          <button class="primary" id="btnMqControl">🎛️ Utiliser cette pose comme image de contrôle</button>
+        </div>
+        <div class="small" id="mqStatus"></div>
+        <img id="mqPreview" class="control-preview hidden" alt="">
+
+        <div class="card inset" id="mqGenCard">
+          <div class="card-title">🎯 Générer une image de référence dans cette pose</div>
+          <p class="hint">L'image obtenue est une image comme les autres : à la fin de la génération, ajoutez-la aux
+            références d'une des deux façons ci-après, puis modifiez-la comme vous voulez (décor, tenue, style…).</p>
+          <label>Moteur
+            <select id="mqEngine"></select>
+          </label>
+          <p class="hint" id="mqEngineHint"></p>
+          <label>Description souhaitée
+            <textarea id="mqPrompt" rows="3" placeholder="ex : athlète en tenue de sport, fond gris uni, éclairage de studio, photo réaliste"></textarea>
+          </label>
+          <div class="row wrap">
+            <label class="check">Exemples
+              <select id="mqPromptPreset" style="width:auto">
+                <option value="">— choisir —</option>
+                <option value="photo">Photo réaliste en studio</option>
+                <option value="sport">Athlète en action</option>
+                <option value="ville">Tenue de ville, rue ensoleillée</option>
+                <option value="dessin">Illustration / dessin animé</option>
+              </select>
+            </label>
+            <label class="check"><input type="checkbox" id="mqPoseInstruction" checked> Ajouter l'instruction de pose au prompt</label>
+          </div>
+          <div class="row wrap">
+            <button class="primary" id="btnMqGenerate">🎯 Générer l'image</button>
+            <button class="ghost" id="btnMqRef" disabled>📎 Ajouter le dernier rendu aux références</button>
+          </div>
+          <div class="small" id="mqGenStatus"></div>
+          <div id="mqResult" class="refs"></div>
+        </div>
+      </div>
+
+      <div class="grid2" id="formatRow">
         <label>Format
           <select id="preset">
             <option value="1024x1024">Carré 1:1 (1024×1024)</option>
@@ -99,7 +320,44 @@
         <div class="placeholder">L'image apparaîtra ici</div>
       </div>
       <div id="resultMeta" class="small"></div>
+      <div id="resultControl" class="small"></div>
     </div>
+  </div>
+</section>
+
+<!-- ============================== MODÈLES ============================== -->
+<section id="tab-models" class="tab">
+  <h2>Télécharger les modèles</h2>
+  <p class="hint">Chaque modèle s'installe en un clic, <b>génération et édition d'image comprises</b>.
+    Les fichiers arrivent dans <code>models/&lt;modèle&gt;/…</code> et deviennent utilisables immédiatement.</p>
+
+  <div id="modelsNotice" class="notice hidden"></div>
+
+  <div class="card">
+    <div class="card-title">1. Moteur (stable‑diffusion.cpp)</div>
+    <div id="engineInfo" class="small"></div>
+    <div class="row wrap">
+      <label>Variante <select id="flavor"></select></label>
+      <button id="btnEngine" class="primary">Installer / mettre à jour</button>
+    </div>
+    <p class="hint">Le binaire officiel précompilé est téléchargé depuis GitHub. NVIDIA → <b>cuda</b> (recommandé),
+      AMD/Intel/autres → <b>vulkan</b>. Vous pouvez aussi copier votre propre <code>sd-cli</code> dans le dossier <code>bin/</code>.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title">2. Modèles <span class="small" id="diskFree"></span></div>
+    <p class="hint">La famille <b>SD 1.5 + ControlNet</b> ajoute le pilotage de la <b>pose des personnages</b> :
+      modèle de contrôle OpenPose + détecteur automatique de personnages.
+      Choisissez la quantification puis cliquez sur <b>Tout télécharger</b> : les fichiers manquants
+      sont téléchargés à la suite, et le modèle devient actif. Tout fichier <code>.gguf</code>/<code>.safetensors</code>
+      copié manuellement dans <code>models/&lt;modèle&gt;/&lt;catégorie&gt;/</code> apparaît aussi automatiquement
+      (fine‑tunes, autres quantifications…), sélectionnable par bouton radio.</p>
+    <div id="modelSections"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Téléchargements en cours</div>
+    <div id="modelJobs"></div>
   </div>
 </section>
 
@@ -117,23 +375,7 @@
   <h2>Configuration</h2>
 
   <div class="card">
-    <div class="card-title">1. Moteur (stable‑diffusion.cpp)</div>
-    <div id="engineInfo" class="small"></div>
-    <div class="row wrap">
-      <label>Variante <select id="flavor"></select></label>
-      <button id="btnEngine" class="primary">Installer / mettre à jour</button>
-    </div>
-    <p class="hint">Le binaire officiel précompilé est téléchargé depuis GitHub. NVIDIA → <b>cuda</b> (recommandé), AMD/Intel/autres → <b>vulkan</b>. Vous pouvez aussi copier votre propre <code>sd-cli</code> dans le dossier <code>bin/</code>.</p>
-  </div>
-
-  <div class="card">
-    <div class="card-title">2. Modèles <span class="small" id="diskFree"></span></div>
-    <p class="hint">Pour chaque modèle, cliquez « Télécharger » sur les fichiers marqués <b>recommandé</b>. Tout fichier <code>.gguf</code>/<code>.safetensors</code> copié manuellement dans <code>models/&lt;modèle&gt;/&lt;catégorie&gt;/</code> apparaît automatiquement — y compris vos propres variantes (fine‑tunes, autres quantifications) du modèle de diffusion, sélectionnables par le bouton radio.</p>
-    <div id="modelSections"></div>
-  </div>
-
-  <div class="card">
-    <div class="card-title">3. Performance</div>
+    <div class="card-title">Performance</div>
     <label class="check"><input type="checkbox" id="offload"> Décharger les poids en RAM (<code>--offload-to-cpu</code>) — recommandé si ≤ 16 Go de VRAM</label>
     <label class="check"><input type="checkbox" id="fa"> Flash attention (<code>--diffusion-fa</code>) — plus rapide et moins de VRAM sur CUDA</label>
     <label class="check"><input type="checkbox" id="vaetiling"> VAE tiling (<code>--vae-tiling</code>) — pour les grandes images si manque de mémoire</label>
@@ -143,14 +385,30 @@
   </div>
 
   <div class="card">
+    <div class="card-title">Fichiers utilisés par le modèle actif</div>
+    <div id="activeFiles" class="small"></div>
+    <p class="hint">Ces fichiers se choisissent dans l'onglet <a href="#" data-goto="models">Modèles</a> (bouton radio de chaque ligne).</p>
+  </div>
+
+  <div class="card">
     <div class="card-title">Téléchargements</div>
     <div id="jobs"></div>
-    <button id="btnClearJobs" class="ghost">Effacer les terminés</button>
+    <div class="row wrap">
+      <button id="btnClearJobs" class="ghost">Effacer les terminés</button>
+      <button id="btnCancelJobs" class="danger">■ Tout annuler</button>
+      <button id="btnOpenModels" class="ghost">📁 Dossier des modèles</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Dossiers</div>
+    <div id="paths" class="small"></div>
   </div>
 </section>
 </main>
 
 <div id="lightbox" class="lightbox hidden"><img id="lightboxImg" alt=""><div id="lightboxCap"></div></div>
+<script src="/static/mannequin.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

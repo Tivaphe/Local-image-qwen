@@ -69,9 +69,68 @@ code{background:#0a0c10;padding:1px 5px;border-radius:4px;font-size:12.5px}
 .lightbox div{color:#ccc;font-size:13px;margin-top:8px;max-width:90vw;text-align:center}
 h2{margin:6px 0 12px}
 
-.fam{margin:14px 0;border:1px solid var(--border);border-radius:12px;overflow:hidden}
-.fam>summary{cursor:pointer;padding:10px 14px;background:var(--panel2);font-weight:600;list-style:none;display:flex;justify-content:space-between;align-items:center}
-.fam>summary::-webkit-details-marker{display:none}
-.fam .body{padding:4px 12px 10px}
-.fam .st{font-size:12px;font-weight:400}
-.fam .st.ok{color:var(--ok)}.fam .st.ko{color:var(--warn)}
+.fam{margin:14px 0;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--panel2)}
+.fam-head{padding:10px 14px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.fam-title{font-weight:600;font-size:15.5px}
+.fam-body{padding:2px 14px 12px;border-top:1px solid var(--border)}
+.fam .st{font-size:12px;font-weight:500;padding:2px 8px;border-radius:8px;margin-left:6px;white-space:nowrap}
+.fam .st.ok{color:var(--ok);background:#1f3b2a}
+.fam .st.part{color:var(--warn);background:#3a2f14}
+.fam .st.ko{color:var(--err);background:#3a1c22}
+.plan{list-style:none;margin:10px 0;padding:0}
+.plan li{padding:3px 0;font-size:13.5px}
+.tag.warn{background:#3a2f14;color:var(--warn)}
+.job-file{padding:3px 0 3px 12px;font-size:12.5px;color:var(--muted)}
+.job-file .name{color:var(--txt)}
+.job .err{color:var(--err);white-space:pre-wrap}
+button.link{background:none;border:none;color:#fff;text-decoration:underline;cursor:pointer;padding:0 2px;font-size:inherit}
+.small.err{color:var(--err)}
+.modes{display:flex;gap:8px;margin-bottom:14px}
+.modes .seg{flex:1;padding:11px 12px;border-radius:10px;background:var(--panel);border:1px solid var(--border);color:var(--muted);font-size:15px}
+.modes .seg.active{background:var(--acc);border-color:var(--acc2);color:#fff;font-weight:600}
+#editCard.highlight{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc2) inset}
+#editCard.highlight .card-title{color:#c9bbff}
+details.files{margin-top:10px}
+details.files>summary{cursor:pointer;color:var(--muted);font-size:13.5px}
+.grid2 select{margin-top:4px}
+
+/* ---------------- contrôle de pose (ControlNet) ---------------- */
+.control-preview{width:100%;max-height:230px;object-fit:contain;background:#0a0c10;border:1px solid var(--border);border-radius:8px;margin-top:4px}
+#poseEditor{margin-top:10px;border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--panel2)}
+#poseCanvas{width:100%;max-width:520px;height:auto;border-radius:8px;background:#0a0c10;cursor:crosshair;touch-action:none;display:block}
+#poseEditor .row{align-items:center}
+.card.dim #controlBody{opacity:.62}                /* modèle actif sans ControlNet : carte en retrait */
+.pose-tip{color:#c9bbff}
+.tag.kpt{background:#2b2550;color:#c9bbff;margin-left:4px}
+#controlStatus.ok{color:var(--ok)}
+#controlStatus.warn{color:var(--warn)}
+
+/* ---------------- mannequin articulé ---------------- */
+#mannequinCard .card.inset{background:var(--panel2);border-radius:10px;padding:12px 14px}
+.mannequin-canvas{width:100%;max-width:560px;height:auto;border-radius:10px;background:#0f1218;border:1px solid var(--border);
+  cursor:grab;touch-action:none;display:block;margin:10px 0}
+.mannequin-canvas.dragging{cursor:grabbing}
+#mqStatus.ok{color:var(--ok)}
+#mqStatus.warn{color:var(--warn)}
+#mqGenStatus.ok{color:var(--ok)}
+#mqGenStatus.warn{color:var(--warn)}
+#mqInfo{color:#c9bbff}
+#mqResult img{height:110px}
+#mqResult .ref{position:relative}
+#mqResult .ref button{position:absolute;top:2px;right:2px;padding:0 5px;font-size:11px;line-height:16px}
+#mqBuildBox{margin:10px 0}
+#mqBuildBox>summary{cursor:pointer;color:var(--muted);font-size:13.5px}
+
+/* ---------------- tableau des dimensions du mannequin ---------------- */
+.mq-table-wrap{max-height:330px;overflow:auto;border:1px solid var(--border);border-radius:10px;margin:8px 0}
+table.mq-table{width:100%;border-collapse:collapse;font-size:13px}
+table.mq-table th{position:sticky;top:0;background:var(--panel2);text-align:left;padding:6px 8px;font-weight:600;
+  color:var(--muted);border-bottom:1px solid var(--border);z-index:1}
+table.mq-table td{padding:3px 8px;border-top:1px solid #23283317}
+table.mq-table tr:hover td{background:#ffffff08}
+table.mq-table tr.group td{background:var(--panel2);color:#c9bbff;font-weight:600;font-size:12.5px;
+  text-transform:uppercase;letter-spacing:.03em;padding:5px 8px}
+table.mq-table input{width:78px;margin:0;padding:4px 6px;font-size:13px;text-align:right}
+table.mq-table .unit{color:var(--muted);font-size:12px;margin-left:3px}
+table.mq-table tr.changed input{background:#2b2550;border-color:var(--acc)}
+#mqSizeInfo{color:#c9bbff}

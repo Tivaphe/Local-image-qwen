@@ -5,6 +5,7 @@ MODELS_DIR = ROOT / "models"
 OUTPUTS_DIR = ROOT / "outputs"
 BIN_DIR = ROOT / "bin"
 UPLOADS_DIR = ROOT / "uploads"
+CONTROLS_DIR = UPLOADS_DIR / "controls"      # images de contrôle (pose, contours) générées par l'app
 CONFIG_FILE = ROOT / "config.json"
 STATIC_DIR = ROOT / "app" / "static"
 
@@ -17,8 +18,20 @@ def model_dir(family: str, category: str) -> Path:
     return MODELS_DIR / family / category
 
 
+def controlnet_path(name: str) -> Path | None:
+    """Cherche un modèle de contrôle (ControlNet ou détecteur de pose) où qu'il soit."""
+    if not name:
+        return None
+    for fam in FAMILIES:
+        for cat in ("controlnet", "pose_detector"):
+            p = MODELS_DIR / fam / cat / name
+            if p.exists():
+                return p
+    return None
+
+
 def ensure_dirs() -> None:
-    for d in [MODELS_DIR, OUTPUTS_DIR, BIN_DIR, UPLOADS_DIR]:
+    for d in [MODELS_DIR, OUTPUTS_DIR, BIN_DIR, UPLOADS_DIR, CONTROLS_DIR]:
         d.mkdir(parents=True, exist_ok=True)
     for fam in FAMILIES:
         for cat in CATEGORIES:

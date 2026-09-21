@@ -4,6 +4,11 @@ __pycache__/
 *.pyc
 config.json
 
+# tests d'interface (jsdom) : dépendances npm locales
+node_modules/
+package-lock.json
+package.json
+
 # données lourdes (jamais dans git)
 bin/*
 !bin/.gitkeep
