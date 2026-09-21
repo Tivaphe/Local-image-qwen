@@ -178,33 +178,31 @@
           <input type="range" id="mqDepth" min="-100" max="100" step="1" value="0">
         </label>
 
-        <details id="mqBuildBox">
-          <summary>Proportions du corps (taille, carrure, jambes…)</summary>
-          <div class="grid2">
-            <label>Taille <span class="val" id="mqStatureVal">100 %</span>
-              <input type="range" id="mqStature" min="80" max="120" step="1" value="100">
-            </label>
-            <label>Carrure (gabarit) <span class="val" id="mqBulkVal">100 %</span>
-              <input type="range" id="mqBulk" min="75" max="145" step="1" value="100">
-            </label>
-            <label>Largeur d'épaules <span class="val" id="mqShouldersVal">100 %</span>
-              <input type="range" id="mqShoulders" min="70" max="140" step="1" value="100">
-            </label>
-            <label>Longueur de jambes <span class="val" id="mqLegsVal">100 %</span>
-              <input type="range" id="mqLegs" min="80" max="120" step="1" value="100">
-            </label>
-            <label>Longueur de bras <span class="val" id="mqArmsVal">100 %</span>
-              <input type="range" id="mqArms" min="80" max="120" step="1" value="100">
-            </label>
-            <label>Morphologie
-              <select id="mqBody">
-                <option value="neutre">Neutre</option>
+        <details id="mqBuildBox" open>
+          <summary>📐 Tableau des dimensions (chaque segment du corps)</summary>
+          <p class="hint">Modifiez une valeur : le mannequin garde ces dimensions exactes, quelle que soit la pose.
+            « Longueur » est la taille de l'os, « épaisseur » son diamètre au milieu (en cm).</p>
+          <div class="row wrap">
+            <label class="check">Morphologie de départ
+              <select id="mqMorphology" style="width:auto">
+                <option value="neutre">Neutre (corps standard)</option>
                 <option value="fin">Fine</option>
                 <option value="athletique">Athlétique</option>
                 <option value="fort">Forte</option>
                 <option value="femme">Féminine</option>
               </select>
             </label>
+            <label class="check"><input type="checkbox" id="mqSymmetry" checked> Appliquer aux deux côtés (gauche = droite)</label>
+            <button class="ghost" id="btnMqReset">↺ Dimensions par défaut</button>
+            <span class="small" id="mqSizeInfo"></span>
+          </div>
+          <div class="mq-table-wrap">
+            <table class="mq-table" id="mqTable">
+              <thead>
+                <tr><th>Segment</th><th>Longueur (cm)</th><th>Épaisseur (cm)</th><th></th></tr>
+              </thead>
+              <tbody id="mqTableBody"></tbody>
+            </table>
           </div>
         </details>
 

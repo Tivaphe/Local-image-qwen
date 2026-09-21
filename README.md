@@ -106,7 +106,7 @@ Sous le capot, la commande envoyée à `sd-cli` est
 
 Quand aucune image de référence ne convient, la carte **🤸 Mannequin articulé** permet de **poser un
 personnage à la main** puis de s'en servir comme référence de pose. Tout est dessiné par l'application :
-**aucun fichier à télécharger**, aucune connexion (le module fait ~700 lignes de JavaScript et une
+**aucun fichier à télécharger**, aucune connexion (le module fait ~1100 lignes de JavaScript et une
 projection 3D maison).
 
 1. **Poser** : faites glisser une articulation sur le canvas. Les os ont une **longueur fixe** : tirer le
@@ -118,9 +118,13 @@ projection 3D maison).
      reste rigide (la pointe levée fait tourner le talon) et les points du visage suivent la tête.
    - **↶ Annuler**, **⇄ Miroir**, **Face / Profil**, **⤢ Recadrer**, poses types (debout, marche, course,
      assis, accroupi, danse, main levée).
-2. **Proportions** (dépliant « Proportions du corps ») : taille, carrure, largeur d'épaules, longueur de
-   jambes, longueur de bras, et morphologie (fine, athlétique, forte, féminine). Les longueurs d'os sont
-   recalculées — la pose déjà réglée est conservée.
+2. **Dimensions** (dépliant « 📐 Tableau des dimensions ») : **une ligne par segment du corps**
+   (bassin, colonne, poitrine, cou, tête, épaules, bras, avant-bras, main, cuisse, jambe, pied…), avec sa
+   **longueur** et son **épaisseur** en centimètres. Modifiez une valeur : le pantin garde **exactement**
+   ces dimensions, quelle que soit la pose (l'épaisseur pilote les capsules et le tronc). Le bouton ⇄
+   recopie une valeur sur le côté opposé (ou décochez « Appliquer aux deux côtés » pour un corps
+   asymétrique). Le menu **Morphologie de départ** (neutre, fine, athlétique, forte, féminine) remplit tout
+   le tableau d'un coup, et « ↺ Dimensions par défaut » y revient — la pose déjà réglée est conservée.
 3. **Image à produire** :
    - **Squelette OpenPose** → pour ControlNet (pose exacte, 18 points aux couleurs canoniques) ;
    - **Mannequin ombré** ou **filaire** → image de référence pour Qwen‑Image‑2.1 / FLUX.2 klein ;
@@ -205,7 +209,7 @@ de bons réglages de départ.
 
 ```bash
 pip install -r requirements-dev.txt     # pytest + httpx
-python -m pytest -q                     # 82 tests : catalogue, téléchargements, API, pose, mannequin, commande sd-cli
+python -m pytest -q                     # 89 tests : catalogue, téléchargements, API, pose, mannequin, commande sd-cli
 
 npm install jsdom                       # une seule fois, pour les tests d'interface
 node tests/ui_render.mjs                # rejoue app.js sur un vrai /api/status (serveur lancé)
@@ -220,8 +224,8 @@ SD 1.5 + ControlNet, détection automatique de la pose, glisser‑déposer d'une
 (`POST /api/control/pose`) et envoi des paramètres de contrôle à `POST /api/generate`.
 
 Il vérifie enfin le **mannequin articulé** : dessin du pantin, pose à la souris (le membre suit et le
-coude se plie), **longueurs d'os conservées au 1e‑9 près** après chaque manipulation, curseurs de
-proportions, miroir, annulation, export (`POST /api/mannequin/render`) et les deux voies de génération
+coude se plie), **longueurs d'os conservées au 1e‑9 près** après chaque manipulation, tableau des
+dimensions (une ligne par segment, symétrie gauche/droite, morphologies), miroir, annulation, export (`POST /api/mannequin/render`) et les deux voies de génération
 (ControlNet avec `control_id`, ou modèle d'édition avec `ref_id`). `tests/canvas_shim.mjs` fournit un
 canvas 2D minimal (chemins, dégradés, transformations) et un encodeur PNG : les rendus du mannequin
 sont donc réellement rasterisés dans les tests Python (`tests/test_mannequin.py`), sans navigateur.

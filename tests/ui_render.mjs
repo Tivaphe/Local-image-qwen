@@ -518,27 +518,51 @@ check("curseur de profondeur : le point avance/recule",
   K.dist(rig.pose.chest, chestBefore) > 0.1 && Math.abs(rig.pose.chest.z - chestBefore.z) > 0.02,
   `Δz = ${(rig.pose.chest.z - chestBefore.z).toFixed(3)} m`);
 
-// --- proportions par curseurs (la pose tenue à la main est conservée)
+// --- tableau des dimensions (la pose tenue à la main est conservée)
+check("tableau des dimensions : une ligne par segment",
+  doc.querySelectorAll("#mqTableBody tr[data-bone]").length === K.SEGMENTS.length,
+  doc.querySelectorAll("#mqTableBody tr[data-bone]").length + " segments");
+check("tableau des dimensions : valeurs remplies depuis le pantin",
+  Number(doc.querySelector('#mqTableBody input[data-bone="knee_l"][data-kind="length"]').value) === +(rig.lengths.knee_l * 100).toFixed(1),
+  Number(doc.querySelector('#mqTableBody input[data-bone="knee_l"][data-kind="length"]').value) + " cm");
 const hipsAvant = rig.pose.hips.y;
-const bulk = doc.querySelector("#mqBulk");
-bulk.value = "135";
-bulk.oninput({ target: bulk });
-check("curseur de carrure : morphologie appliquée", Math.abs(rig.build.build - 1.35) < 1e-9, String(rig.build.build));
-check("curseur de carrure : torse et capsules plus épais",
-  rig.lengths.chest > K.boneLengths({ build: 1 }).chest
-  && K.boneRadii(rig.build)[0][0] > K.boneRadii({ build: 1 })[0][0]);
-check("curseur de carrure : pose conservée (pas de retour à la pose type)", rig.pose.hips.y === hipsAvant,
+const champCuisse = doc.querySelector('#mqTableBody input[data-bone="knee_l"][data-kind="length"]');
+champCuisse.value = "50";
+champCuisse.dispatchEvent(new window.Event("input", { bubbles: true }));
+check("tableau : saisir une longueur allonge l'os", Math.abs(rig.lengths.knee_l - 0.5) < 1e-9,
+  (rig.lengths.knee_l * 100).toFixed(1) + " cm");
+check("tableau : le côté opposé suit (symétrie)", Math.abs(rig.lengths.knee_r - 0.5) < 1e-9,
+  (rig.lengths.knee_r * 100).toFixed(1) + " cm");
+check("tableau : la pose tenue à la main est conservée", rig.pose.hips.y === hipsAvant,
   "bassin toujours à " + rig.pose.hips.y.toFixed(2) + " m");
-const stature = doc.querySelector("#mqStature");
-const teteAvant = MQ.rig.pose.head_top.y;
-const torseAvant = MQ.rig.lengths.chest;
-stature.value = "110";
-stature.oninput({ target: stature });
-check("curseur de taille : os plus longs", MQ.rig.lengths.chest > torseAvant * 1.09,
-  `torse ${torseAvant.toFixed(3)} → ${MQ.rig.lengths.chest.toFixed(3)} m`);
-check("curseur de taille : personnage plus haut", MQ.rig.pose.head_top.y > teteAvant,
-  `${teteAvant.toFixed(2)} m → ${MQ.rig.pose.head_top.y.toFixed(2)} m`);
-check("curseur de taille : proportions toujours exactes", boneError() < 1e-9, (boneError() * 100).toFixed(9) + " %");
+check("tableau : dimensions toujours exactes", boneError() < 1e-9, (boneError() * 100).toFixed(9) + " %");
+check("tableau : synthèse de taille mise à jour", /Debout : 1,\d\d m/.test(doc.querySelector("#mqSizeInfo").textContent),
+  doc.querySelector("#mqSizeInfo").textContent.trim());
+const hauteurDebout = () => { const d = K.defaultPose(rig.lengths); return d.head_top.y - d.ankle_l.y; };
+const statureNeutre = (() => { const d = K.defaultPose(K.morphedDimensions("neutre").lengths); return d.head_top.y - d.ankle_l.y; })();
+const poitrineAvant = rig.thickness.chest;
+const stature = doc.querySelector("#mqMorphology");
+stature.value = "athletique";
+stature.onchange({ target: stature });
+const attendu = K.morphedDimensions("athletique");
+check("morphologie : capsules plus épaisses qu'en neutre", rig.thickness.chest > poitrineAvant,
+  `${(poitrineAvant * 100).toFixed(1)} → ${(rig.thickness.chest * 100).toFixed(1)} cm`);
+check("morphologie : os conformes au gabarit choisi",
+  Math.abs(rig.lengths.knee_l - attendu.lengths.knee_l) < 1e-9 && Math.abs(rig.thickness.chest - attendu.thickness.chest) < 1e-9,
+  `cuisse ${(rig.lengths.knee_l * 100).toFixed(1)} cm · poitrine ${(rig.thickness.chest * 100).toFixed(1)} cm`);
+check("morphologie : stature athlétique légèrement plus haute",
+  hauteurDebout() > statureNeutre,
+  `${statureNeutre.toFixed(2)} → ${hauteurDebout().toFixed(2)} m`);
+check("morphologie : tableau rechargé", Number(doc.querySelector('#mqTableBody input[data-bone="knee_l"][data-kind="length"]').value) === +(rig.lengths.knee_l * 100).toFixed(1));
+const epaisseur = doc.querySelector('#mqTableBody input[data-bone="chest"][data-kind="thickness"]');
+epaisseur.value = "20";
+epaisseur.dispatchEvent(new window.Event("input", { bubbles: true }));
+check("tableau : saisir une épaisseur affine les capsules", Math.abs(rig.thickness.chest - 0.2) < 1e-9,
+  (rig.thickness.chest * 100).toFixed(1) + " cm");
+doc.querySelector("#btnMqReset").click();
+check("bouton « dimensions par défaut » : retour à la morphologie choisie",
+  Math.abs(rig.thickness.chest - K.morphedDimensions("athletique").thickness.chest) < 1e-9,
+  (rig.thickness.chest * 100).toFixed(1) + " cm");
 
 // --- miroir et rendu
 const sommeAvant = sumX();

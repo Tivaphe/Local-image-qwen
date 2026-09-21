@@ -1123,7 +1123,8 @@ const MANNEQUIN = {
   pending: false, result: "", jsdomFallback: false,
 };
 
-const MQ_KIT = (typeof MannequinKit !== "undefined" && MannequinKit) ? MannequinKit : { BUILDS: {}, project: null };
+const MQ_KIT = (typeof MannequinKit !== "undefined" && MannequinKit)
+  ? MannequinKit : { BUILDS: {}, SEGMENTS: [], morphedDimensions: () => ({ lengths: {}, thickness: {} }) };
 function mqCanvas() { return $("#mqCanvas"); }
 function mqScale(canvas) {
   const w = canvas.getBoundingClientRect().width || canvas.width;
@@ -1146,6 +1147,7 @@ function mqInit() {
     sel.appendChild(o);
   });
   sel.value = MANNEQUIN.selected;
+  mqBuildTable();
   mqBind();
   mqPaint();
   mqFillEngines();
@@ -1346,37 +1348,149 @@ function mqView(yaw, pitch) {
   mqPaint();
 }
 
-function mqBuildFromSliders() {
-  return {
-    stature: Number($("#mqStature").value) / 100,
-    build: Number($("#mqBulk").value) / 100,
-    shoulders: Number($("#mqShoulders").value) / 100,
-    legs: Number($("#mqLegs").value) / 100,
-    arms: Number($("#mqArms").value) / 100,
-  };
+// --- tableau des dimensions : une ligne par segment (longueur + épaisseur) ---
+const MQ_REF = (() => (typeof MannequinKit !== "undefined" ? MannequinKit.morphedDimensions({}) : { lengths: {}, thickness: {} }))();
+let mqTableBuilt = false;
+
+function mqBuildTable() {
+  const body = $("#mqTableBody");
+  if (!body || mqTableBuilt) return;
+  mqTableBuilt = true;
+  let group = "";
+  for (const seg of MQ_KIT.SEGMENTS) {
+    if (seg.group !== group) {
+      group = seg.group;
+      const tr = document.createElement("tr");
+      tr.className = "group";
+      tr.innerHTML = `<td colspan="4">${esc(group)}</td>`;
+      body.appendChild(tr);
+    }
+    const tr = document.createElement("tr");
+    tr.dataset.bone = seg.bone;
+    tr.innerHTML = `<td>${esc(seg.label)}</td>
+      <td><input type="number" step="0.5" min="1" max="120" data-kind="length" data-bone="${seg.bone}"><span class="unit">cm</span></td>
+      <td><input type="number" step="0.5" min="1" max="60" data-kind="thickness" data-bone="${seg.bone}"><span class="unit">cm</span></td>
+      <td><button class="ghost mq-link" title="Appliquer cette longueur à l'autre côté">⇄</button></td>`;
+    body.appendChild(tr);
+  }
+  // saisie : on applique la valeur au pantin, la pose ne bouge pas
+  body.addEventListener("pointerdown", (ev) => {
+    if (ev.target && ev.target.dataset && ev.target.dataset.bone) mqSnapshot();
+  });
+  body.addEventListener("input", (ev) => {
+    const input = ev.target;
+    if (!input.dataset || !input.dataset.bone) return;
+    mqApplyField(input.dataset.bone, input.dataset.kind, Number(input.value) / 100);
+  });
+  body.addEventListener("click", (ev) => {
+    const btn = ev.target.closest ? ev.target.closest(".mq-link") : null;
+    if (!btn) return;
+    const bone = btn.closest("tr").dataset.bone;
+    mqLinkSides(bone, true);
+  });
+  mqFillTable();
 }
-["#mqStature", "#mqBulk", "#mqShoulders", "#mqLegs", "#mqArms"].forEach((sel) => {
-  $(sel).oninput = () => {
-    $(sel + "Val").textContent = $(sel).value + " %";
-    if (!MANNEQUIN.rig) return;
-    MANNEQUIN.rig.setBuild(mqBuildFromSliders(), { keepPose: true });
-    mqPaint();
-  };
-  $(sel).onpointerdown = () => mqSnapshot();
-});
-$("#mqBody").onchange = (e) => {
-  const preset = MQ_KIT.BUILDS[e.target.value];
-  if (!preset || !MANNEQUIN.rig) return;
-  mqSnapshot();
-  const percent = (v) => Math.round(v * 100);
-  $("#mqStature").value = percent(preset.stature); $("#mqStatureVal").textContent = percent(preset.stature) + " %";
-  $("#mqBulk").value = percent(preset.build); $("#mqBulkVal").textContent = percent(preset.build) + " %";
-  $("#mqShoulders").value = percent(preset.shoulders); $("#mqShouldersVal").textContent = percent(preset.shoulders) + " %";
-  $("#mqLegs").value = percent(preset.legs); $("#mqLegsVal").textContent = percent(preset.legs) + " %";
-  $("#mqArms").value = percent(preset.arms); $("#mqArmsVal").textContent = percent(preset.arms) + " %";
-  MANNEQUIN.rig.setBuild(mqBuildFromSliders(), { keepPose: true });
+
+/** Écrit une valeur (mètres) dans le tableau, en signalant les segments modifiés. */
+function mqSetField(bone, kind, meters, opts) {
+  const input = $(`#mqTableBody input[data-bone="${bone}"][data-kind="${kind}"]`);
+  if (!input) return;
+  input.value = (meters * 100).toFixed(1);
+  const ref = kind === "length" ? MQ_REF.lengths[bone] : MQ_REF.thickness[bone];
+  const row = input.closest("tr");
+  const modifie = ref !== undefined && Math.abs(meters - ref) > 0.0005;
+  if (row) row.classList.toggle("changed", !!modifie || !!(row.dataset.dirty));
+  if (modifie && row) row.dataset.dirty = "1";
+  if (!opts || opts.info !== false) mqSizeInfo();
+}
+
+/** Remplit tout le tableau depuis le pantin. */
+function mqFillTable() {
+  const rig = MANNEQUIN.rig;
+  if (!rig) return;
+  const body = $("#mqTableBody");
+  if (body) body.querySelectorAll("tr").forEach((tr) => { delete tr.dataset.dirty; tr.classList.remove("changed"); });
+  for (const seg of MQ_KIT.SEGMENTS) {
+    mqSetField(seg.bone, "length", rig.lengths[seg.bone], { info: false });
+    mqSetField(seg.bone, "thickness", rig.thickness[seg.bone], { info: false });
+  }
+  mqSizeInfo();
+}
+
+/** Applique une saisie (longueur ou épaisseur) au pantin, pose conservée. */
+let mqSizeTimer = null;
+function mqApplyField(bone, kind, meters) {
+  const rig = MANNEQUIN.rig;
+  if (!rig || !isFinite(meters) || meters <= 0.005) return;
+  const patch = {};
+  patch[bone] = meters;
+  if (kind === "length") rig.setLengths(patch, { keepPose: true });
+  else rig.setThickness(patch, { keepPose: true });
+  if (kind === "length" && $("#mqSymmetry").checked) {
+    const other = bone.endsWith("_l") ? bone.slice(0, -2) + "_r" : bone.endsWith("_r") ? bone.slice(0, -2) + "_l" : "";
+    if (other) {
+      const p2 = {};
+      p2[other] = meters;
+      rig.setLengths(p2, { keepPose: true });
+      mqSetField(other, kind, meters, { info: false });
+      if (kind === "thickness") rig.setThickness(p2, { keepPose: true });
+      if (kind === "thickness") mqSetField(other, "thickness", meters, { info: false });
+    }
+  }
+  rig.fitCamera(mqCanvas().width, mqCanvas().height, 1.1);
+  clearTimeout(mqSizeTimer);
+  mqSizeTimer = setTimeout(mqPaint, 16);            // rendu au fil de la frappe, sans à-coups
+  mqSizeInfo();
+}
+
+/** Recopie une longueur (ou une épaisseur) sur le côté symétrique. */
+function mqLinkSides(bone, both) {
+  const rig = MANNEQUIN.rig;
+  if (!rig) return;
+  const other = bone.endsWith("_l") ? bone.slice(0, -2) + "_r" : bone.endsWith("_r") ? bone.slice(0, -2) + "_l" : "";
+  if (!other) return;
+  for (const kind of (both ? ["length", "thickness"] : ["length"])) {
+    const value = kind === "length" ? rig.lengths[bone] : rig.thickness[bone];
+    if (kind === "length") { const p = {}; p[other] = value; rig.setLengths(p, { keepPose: true }); }
+    else { const p = {}; p[other] = value; rig.setThickness(p, { keepPose: true }); }
+    mqSetField(other, kind, value, { info: false });
+  }
+  rig.fitCamera(mqCanvas().width, mqCanvas().height, 1.1);
   mqPaint();
-  mqSetStatus(`Morphologie « ${MQ_BODY_LABELS[e.target.value] || e.target.value} » appliquée.`);
+  mqSizeInfo();
+  setMqStatusOnly(`Dimensions de « ${MQ_JOINTS[other] || other} » alignées sur l'autre côté.`);
+}
+
+function setMqStatusOnly(msg) { mqSetStatus(msg); }
+
+/** Hauteur réelle du personnage, pour le résumé du tableau. */
+function mqSizeInfo() {
+  const rig = MANNEQUIN.rig;
+  const el = $("#mqSizeInfo");
+  if (!rig || !el) return;
+  const debout = MQ_KIT.defaultPose ? MQ_KIT.defaultPose(rig.lengths) : rig.pose;
+  const haut = debout.head_top.y - Math.min(debout.ankle_l.y, debout.ankle_r.y);
+  const larg = Math.max(debout.shoulder_l.x, debout.shoulder_r.x) - Math.min(debout.shoulder_l.x, debout.shoulder_r.x);
+  el.textContent = `Debout : ${haut.toFixed(2).replace(".", ",")} m · épaules ${(larg * 100).toFixed(0)} cm`;
+}
+
+$("#mqMorphology").onchange = (e) => {
+  if (!MANNEQUIN.rig) return;
+  mqSnapshot();
+  MANNEQUIN.rig.applyMorphology(e.target.value, { keepPose: true });
+  MANNEQUIN.rig.fitCamera(mqCanvas().width, mqCanvas().height, 1.1);
+  mqFillTable();
+  mqPaint();
+  mqSetStatus(`Morphologie « ${MQ_BODY_LABELS[e.target.value] || e.target.value} » appliquée — ajustez ensuite le tableau.`);
+};
+$("#btnMqReset").onclick = () => {
+  if (!MANNEQUIN.rig) return;
+  mqSnapshot();
+  MANNEQUIN.rig.applyMorphology($("#mqMorphology").value || "neutre", { keepPose: true });
+  MANNEQUIN.rig.fitCamera(mqCanvas().width, mqCanvas().height, 1.1);
+  mqFillTable();
+  mqPaint();
+  mqSetStatus("Dimensions remises aux valeurs de la morphologie choisie.");
 };
 
 // ------------------------------------------------------------- export API
@@ -1389,8 +1503,8 @@ function mqPayload(mode, size) {
   const goal = size || mqSizeValue();
   const data = MANNEQUIN.rig.toJSON();
   return {
-    pose: data.pose, build: data.build, mode: mode || mqMode(),
-    width: goal.width, height: goal.height,
+    pose: data.pose, lengths: data.lengths, thickness: data.thickness,
+    mode: mode || mqMode(), width: goal.width, height: goal.height,
     camera: { yaw: data.camera.yaw, pitch: data.camera.pitch, target: [0, MANNEQUIN.rig.camera.target.y, 0] },
   };
 }

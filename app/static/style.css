@@ -120,3 +120,17 @@ details.files>summary{cursor:pointer;color:var(--muted);font-size:13.5px}
 #mqResult .ref button{position:absolute;top:2px;right:2px;padding:0 5px;font-size:11px;line-height:16px}
 #mqBuildBox{margin:10px 0}
 #mqBuildBox>summary{cursor:pointer;color:var(--muted);font-size:13.5px}
+
+/* ---------------- tableau des dimensions du mannequin ---------------- */
+.mq-table-wrap{max-height:330px;overflow:auto;border:1px solid var(--border);border-radius:10px;margin:8px 0}
+table.mq-table{width:100%;border-collapse:collapse;font-size:13px}
+table.mq-table th{position:sticky;top:0;background:var(--panel2);text-align:left;padding:6px 8px;font-weight:600;
+  color:var(--muted);border-bottom:1px solid var(--border);z-index:1}
+table.mq-table td{padding:3px 8px;border-top:1px solid #23283317}
+table.mq-table tr:hover td{background:#ffffff08}
+table.mq-table tr.group td{background:var(--panel2);color:#c9bbff;font-weight:600;font-size:12.5px;
+  text-transform:uppercase;letter-spacing:.03em;padding:5px 8px}
+table.mq-table input{width:78px;margin:0;padding:4px 6px;font-size:13px;text-align:right}
+table.mq-table .unit{color:var(--muted);font-size:12px;margin-left:3px}
+table.mq-table tr.changed input{background:#2b2550;border-color:var(--acc)}
+#mqSizeInfo{color:#c9bbff}

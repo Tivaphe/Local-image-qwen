@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import math
 
+import cv2
+
 import pytest
 
 from app import config, generator, mannequin
@@ -42,7 +44,7 @@ def _ik2(root, l1, l2, target, pole):
 def _plier_bras(pose: dict, cote: str, cible, pole=None) -> dict:
     """Pose le poignet du côté demandé (coude par IK, main dans l'axe de l'avant-bras)."""
     lengths = mannequin.bone_lengths({})
-    epaule, poignet, main = pose[f"shoulder_{cote}"], pose[f"wrist_{cote}"], pose[f"hand_{cote}"]
+    epaule, poignet = pose[f"shoulder_{cote}"], pose[f"wrist_{cote}"]
     pôle = pole or ([0.35, -0.25, -1.0] if cote == "l" else [-0.35, -0.25, -1.0])
     coude, poignet = _ik2(epaule, lengths[f"elbow_{cote}"], lengths[f"wrist_{cote}"], list(cible), pôle)
     axe = [poignet[i] - coude[i] for i in range(3)]
@@ -62,8 +64,8 @@ def _lengths_of(pose: dict) -> dict:
 
 
 def test_pose_par_defaut_respecte_les_longueurs_dos():
-    pose = mannequin.default_pose()
-    lengths = mannequin.bone_lengths()
+    pose = mannequin.default_pose(mannequin.morphed_dimensions("athletique")[0])
+    lengths = mannequin.bone_lengths(mannequin.morphed_dimensions("athletique")[0])
     for bone, measured in _lengths_of(pose).items():
         assert measured == pytest.approx(lengths[bone], abs=1e-9)
         assert measured > 0
@@ -77,36 +79,78 @@ def test_toutes_les_articulations_du_squelette_sont_definies():
     assert len(mannequin.OPENPOSE_LIMBS) == 17
 
 
-@pytest.mark.parametrize("bulk,shoulder,legs,arms", [
-    (1.0, 1.0, 1.0, 1.0), (1.32, 1.2, 0.97, 0.99), (0.86, 0.88, 1.04, 0.97),
-])
-def test_proportions_ajustables(bulk, shoulder, legs, arms):
-    build = {"build": bulk, "shoulders": shoulder, "legs": legs, "arms": arms, "stature": 1.0}
-    lengths = mannequin.bone_lengths(build)
-    ref = mannequin.bone_lengths()
-    assert lengths["shoulder_l"] == pytest.approx(ref["shoulder_l"] * shoulder)
-    assert lengths["knee_l"] == pytest.approx(ref["knee_l"] * legs)
-    assert lengths["elbow_r"] == pytest.approx(ref["elbow_r"] * arms)
-    assert lengths["chest"] == pytest.approx(ref["chest"] * bulk)
-    # une morphologie plus forte donne des capsules plus épaisses
-    assert mannequin.bone_radii({"build": 1.32})[0][0] > mannequin.bone_radii({"build": 0.86})[0][0]
+@pytest.mark.parametrize("morphology,girth", [("fin", 0.84), ("athletique", 1.16), ("fort", 1.34)])
+def test_morphologies_reglent_longueurs_et_epaisseurs(morphology, girth):
+    lengths, thickness = mannequin.morphed_dimensions(morphology)
+    ref_l, ref_t = mannequin.morphed_dimensions("neutre")
+    # la stature pilote tout le squelette, la carrure seulement les épaules
+    assert lengths["knee_l"] / ref_l["knee_l"] == pytest.approx(
+        mannequin.MORPHOLOGIES[morphology]["stature"] * mannequin.MORPHOLOGIES[morphology]["legs"])
+    assert lengths["shoulder_l"] / ref_l["shoulder_l"] == pytest.approx(
+        mannequin.MORPHOLOGIES[morphology]["shoulders"] * mannequin.MORPHOLOGIES[morphology]["stature"])
+    assert thickness["chest"] == pytest.approx(mannequin.BASE_THICK["chest"] * girth)
+    # le tableau reste complet : un segment par os + les points du visage
+    assert set(lengths) >= set(mannequin.BASE_LENGTHS)
+    assert set(thickness) >= set(mannequin.BASE_THICK)
+    radii = mannequin.bone_radii(thickness)
+    assert len(radii) == len(mannequin.BONES)
 
 
-def test_taille_du_personnage_suit_la_stature():
-    petit = mannequin.default_pose({"stature": 0.8})
-    grand = mannequin.default_pose({"stature": 1.2})
-    assert grand["head_top"][1] / petit["head_top"][1] == pytest.approx(1.5, rel=1e-6)
+def test_tableau_des_dimensions_fixe_la_pose():
+    """Les dimensions envoyées par l'interface sont respectées à la lettre, quelle que soit la pose."""
+    lengths = {k: v * 1.1 for k, v in mannequin.BASE_LENGTHS.items()}
+    lengths.pop("wrist_l")                     # non renseigné : la valeur de référence s'applique
+    build, pose, _cam = mannequin.validate({"pose": {}, "lengths": lengths})
+    mesure = _lengths_of(pose)
+    for bone, valeur in build["lengths"].items():
+        if bone in mesure:
+            # au micromètre près : les dimensions du tableau ne bougent jamais
+            assert mesure[bone] == pytest.approx(valeur, abs=1e-6)
+    assert build["lengths"]["wrist_l"] == pytest.approx(mannequin.BASE_LENGTHS["wrist_l"])
+    assert build["lengths"]["knee_l"] == pytest.approx(mannequin.BASE_LENGTHS["knee_l"] * 1.1)
+
+    # les épaisseurs pilotent les capsules du rendu
+    mince = mannequin.render({"pose": {}, "lengths": mannequin.morphed_dimensions("neutre")[0],
+                              "thickness": {k: 0.05 for k in mannequin.BASE_THICK}}, "silhouette", 256, 384)
+    epais = mannequin.render({"pose": {}, "lengths": mannequin.morphed_dimensions("neutre")[0],
+                              "thickness": {k: 0.20 for k in mannequin.BASE_THICK}}, "silhouette", 256, 384)
+    assert (epais > 128).sum() > (mince > 128).sum() * 1.3
+
+
+def test_taille_du_personnage_suit_les_longueurs():
+    petit = mannequin.default_pose(mannequin.morphed_dimensions("femme")[0])
+    grand = mannequin.default_pose({k: v * 1.2 for k, v in mannequin.morphed_dimensions("neutre")[0].items()})
+    assert (grand["head_top"][1] - grand["ankle_l"][1]) / (petit["head_top"][1] - petit["ankle_l"][1]) > 1.15
+
+
+def test_trone_suit_les_epaisseurs_reglees():
+    """Le tronc est reconstruit à partir des épaisseurs : plus large quand on épaissit poitrine/bassin."""
+    def largeur(thickness):
+        pose = mannequin.default_pose()
+        rings = mannequin._torso_rings(pose, thickness)
+        haut = rings[-6][0]
+        return max(p[0] for p in haut) - min(p[0] for p in haut)
+    ref = dict(mannequin.BASE_THICK)
+    gros = dict(mannequin.BASE_THICK)
+    gros["spine"] = gros["chest"] = 0.45
+    assert largeur(gros) > largeur(ref) * 1.2
+    assert largeur(ref) > 0.15
 
 
 def test_validation_ecarte_les_valeurs_absurdes():
-    build, pose, camera = mannequin.validate({"build": {"stature": "99"}, "pose": {}})
-    assert build["stature"] == pytest.approx(1.8)          # borné
-    assert camera["yaw"] == pytest.approx(0.22)
+    build, pose, camera = mannequin.validate({"morphology": "fort", "pose": {}})
+    assert build["morphology"] == "fort"
+    assert build["lengths"]["knee_l"] == pytest.approx(mannequin.morphed_dimensions("fort")[0]["knee_l"])
+    assert camera["yaw"] == pytest.approx(0.42)
     with pytest.raises(mannequin.MannequinError) as e:
         mannequin.validate({"pose": {"hips": ["x", 1, 1], "neck": [0, 1, 0]}})
     assert "incomplète" in str(e.value)
     with pytest.raises(mannequin.MannequinError):
-        mannequin.validate({"pose": {"hips": [0, 1, 0]}, "build": {"build": "beaucoup"}})
+        mannequin.validate({"pose": {}, "lengths": {"knee_l": "beaucoup"}})
+    with pytest.raises(mannequin.MannequinError):
+        mannequin.validate({"pose": {}, "lengths": {"knee_l": 12}})
+    with pytest.raises(mannequin.MannequinError):
+        mannequin.validate({"pose": {}, "thickness": {"chest": -1}})
     with pytest.raises(mannequin.MannequinError):
         mannequin.render({"pose": {"hips": [0, 1, 0], "neck": [0, 1.4, 0]}}, "flou", 256, 256)
 
@@ -246,6 +290,33 @@ def test_api_rendu_du_mannequin_accepte_une_pose_ajustee(client):
     r = client.post("/api/mannequin/render", json={"pose": pose, "mode": "volume", "width": 256, "height": 256})
     assert r.status_code == 200
     assert r.json()["mode"] == "volume"
+
+
+def test_api_rendu_respecte_le_tableau_des_dimensions(client, uploads):
+    """Les dimensions envoyées par l'interface pilotent le rendu, et les valeurs absurdes sont refusées."""
+    def couverture(payload):
+        r = client.post("/api/mannequin/render", json=payload)
+        assert r.status_code == 200, r.text
+        img = cv2.imread(str(uploads / r.json()["control"]["id"]), cv2.IMREAD_GRAYSCALE)
+        assert img is not None, r.json()["control"]["id"]
+        return float((img > 128).mean())
+
+    base = {"pose": {}, "mode": "silhouette", "width": 320, "height": 448}
+    reference = couverture(base)
+    grand = couverture({**base, "lengths": {"knee_l": 0.5, "knee_r": 0.5, "ankle_l": 0.46, "ankle_r": 0.46}})
+    large = couverture({**base, "thickness": {k: 0.30 for k in mannequin.BASE_THICK}})
+    athletique = couverture({**base, "morphology": "athletique"})
+    assert grand != pytest.approx(reference, abs=0.002)       # des jambes plus longues changent la silhouette
+    assert large > reference * 1.2                            # des capsules épaisses couvrent plus de pixels
+    assert athletique != pytest.approx(reference, abs=1e-9)
+
+    r = client.post("/api/mannequin/render", json={**base, "lengths": {"inconnu": 0.3}})
+    assert r.status_code == 200                    # un segment inconnu est simplement ignoré
+    for mauvais in ({"lengths": {"knee_l": 12}}, {"lengths": {"knee_l": "beaucoup"}},
+                    {"thickness": {"chest": -2}}):
+        r = client.post("/api/mannequin/render", json={**base, **mauvais})
+        assert r.status_code == 400, mauvais
+        assert "limites" in r.json()["detail"] or "invalide" in r.json()["detail"]
 
 
 def test_api_rendu_refuse_un_mode_inconnu(client):

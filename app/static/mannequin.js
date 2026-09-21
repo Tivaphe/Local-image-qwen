@@ -188,49 +188,137 @@
   }
   const ORDER = hierarchyOrder();
 
-  // -------------------------------------------------------- proportions
-  const BUILDS = {
-    neutre: { stature: 1, shoulders: 1, legs: 1, arms: 1, build: 1 },
-    fin: { stature: 1, shoulders: 0.88, legs: 1.04, arms: 0.97, build: 0.86 },
-    athletique: { stature: 1.01, shoulders: 1.12, legs: 1.0, arms: 1.0, build: 1.14 },
-    fort: { stature: 1, shoulders: 1.2, legs: 0.97, arms: 0.99, build: 1.32 },
-    femme: { stature: 0.97, shoulders: 0.88, legs: 1.02, arms: 0.96, build: 0.92 },
+  // -------------------------------------------------------- dimensions
+  // Toutes les dimensions sont FIXES : le tableau de réglages de l'interface écrit ici.
+  // Longueurs de chaque segment (mètres) et épaisseurs (diamètre au milieu, mètres).
+  const BASE_LENGTHS = {
+    spine: 0.16, chest: 0.20, neck: 0.10, head: 0.13, head_top: 0.10,
+    shoulder_l: 0.19, elbow_l: 0.28, wrist_l: 0.25, hand_l: 0.10,
+    shoulder_r: 0.19, elbow_r: 0.28, wrist_r: 0.25, hand_r: 0.10,
+    hip_l: 0.11, knee_l: 0.44, ankle_l: 0.42, toe_l: 0.17, heel_l: 0.08,
+    hip_r: 0.11, knee_r: 0.44, ankle_r: 0.42, toe_r: 0.17, heel_r: 0.08,
+  };
+  const BASE_THICK = {
+    spine: 0.262, chest: 0.315, neck: 0.168, head: 0.176, head_top: 0.155,
+    shoulder_l: 0.108, elbow_l: 0.110, wrist_l: 0.088, hand_l: 0.075,
+    shoulder_r: 0.108, elbow_r: 0.110, wrist_r: 0.088, hand_r: 0.075,
+    hip_l: 0.180, knee_l: 0.150, ankle_l: 0.102, toe_l: 0.080, heel_l: 0.074,
+    hip_r: 0.180, knee_r: 0.150, ankle_r: 0.102, toe_r: 0.080, heel_r: 0.074,
   };
 
-  /** Longueurs d'os en fonction des proportions demandées (en mètres). */
-  function boneLengths(opts) {
-    const o = Object.assign({}, BUILDS.neutre, opts || {});
-    const s = o.stature || 1;
-    const base = {
-      spine: 0.16, chest: 0.20, neck: 0.10, head: 0.13, head_top: 0.10,
-      shoulder_l: 0.19, elbow_l: 0.28, wrist_l: 0.25, hand_l: 0.10,
-      shoulder_r: 0.19, elbow_r: 0.28, wrist_r: 0.25, hand_r: 0.10,
-      hip_l: 0.11, knee_l: 0.44, ankle_l: 0.42, toe_l: 0.17, heel_l: 0.08,
-      hip_r: 0.11, knee_r: 0.44, ankle_r: 0.42, toe_r: 0.17, heel_r: 0.08,
-    };
-    const lengths = {};
-    for (const k in base) lengths[k] = base[k] * s;
-    lengths.chest *= o.build; lengths.spine *= o.build;
-    for (const side of ["l", "r"]) {
-      lengths["shoulder_" + side] *= o.shoulders;
-      lengths["elbow_" + side] *= o.arms;
-      lengths["wrist_" + side] *= o.arms;
-      lengths["knee_" + side] *= o.legs;
-      lengths["ankle_" + side] *= o.legs;
+  // Morphologies types : de simples jeux de facteurs qui remplissent le tableau
+  // (ensuite, seules les valeurs du tableau comptent).
+  const MORPHOLOGIES = {
+    neutre: { stature: 1, shoulders: 1, legs: 1, arms: 1, girth: 1 },
+    fin: { stature: 1, shoulders: 0.88, legs: 1.04, arms: 0.97, girth: 0.84 },
+    athletique: { stature: 1.01, shoulders: 1.12, legs: 1.0, arms: 1.0, girth: 1.16 },
+    fort: { stature: 1, shoulders: 1.18, legs: 0.97, arms: 0.99, girth: 1.34 },
+    femme: { stature: 0.97, shoulders: 0.88, legs: 1.02, arms: 0.96, girth: 0.92 },
+  };
+  const BUILDS = MORPHOLOGIES;                      // ancien nom, conservé
+
+  /** Dimensions complètes pour une morphologie (longueurs + épaisseurs), en mètres. */
+  function morphedDimensions(morph) {
+    const preset = typeof morph === "string" ? (MORPHOLOGIES[morph] || {}) : (morph || {});
+    const o = Object.assign({}, MORPHOLOGIES.neutre, preset);
+    const lengths = {}, thickness = {};
+    for (const bone in BASE_LENGTHS) {
+      const side = bone.slice(-2);
+      let f = o.stature;
+      if (bone === "spine" || bone === "chest") f *= o.stature;   // le tronc suit la taille
+      if (side === "_l" || side === "_r") {
+        if (bone.startsWith("shoulder")) f *= o.shoulders;
+        if (bone.startsWith("elbow") || bone.startsWith("wrist")) f *= o.arms;
+        if (bone.startsWith("knee") || bone.startsWith("ankle")) f *= o.legs;
+      }
+      lengths[bone] = BASE_LENGTHS[bone] * f;
+      thickness[bone] = BASE_THICK[bone] * o.girth;
     }
     // points du visage : distances à la tête (ils tournent avec elle)
     const h = lengths.head;
     lengths.nose = 0.985 * h; lengths.eye_l = lengths.eye_r = 0.930 * h;
     lengths.ear_l = lengths.ear_r = 0.625 * h;
-    return lengths;
+    thickness.nose = thickness.eye_l = thickness.eye_r = 0.06;
+    thickness.ear_l = thickness.ear_r = 0.05;
+    return { lengths, thickness };
   }
 
-  /** Rayons des capsules (silhouette plus ou moins épaisse). */
-  function boneRadii(opts) {
-    const o = Object.assign({}, BUILDS.neutre, opts || {});
-    const k = o.build;
-    return BONES.map(([, , r1, r2]) => [r1 * (0.85 + 0.15 * k) * (k > 1 ? k * 0.92 : 1), r2 * (0.85 + 0.15 * k) * (k > 1 ? k * 0.92 : 1)]);
+  /** Longueurs d'une morphologie (compatibilité : sert à remplir le tableau). */
+  function boneLengths(opts) {
+    return morphedDimensions(opts).lengths;
   }
+
+  // Épaisseurs de référence (compatibilité) : diamètre de chaque segment
+  function boneThickness(opts) {
+    return morphedDimensions(opts).thickness;
+  }
+
+  // Rapport de conicité de chaque segment (rayon au départ / rayon à l'arrivée),
+  // dérivé de la table de capsules ci-dessus : une seule source de vérité.
+  const BONE_TAPER = {};
+  for (const [, child, r1, r2] of BONES) {
+    const mean = (r1 + r2) / 2;
+    BONE_TAPER[child] = [r1 / mean, r2 / mean];
+  }
+
+  /** Rayons des capsules à partir des épaisseurs fournies (ou des valeurs de référence). */
+  function boneRadii(thickness) {
+    const t = thickness || BASE_THICK;
+    return BONES.map(([, child]) => {
+      const dia = t[child] !== undefined ? t[child] : BASE_THICK[child];
+      const [k1, k2] = BONE_TAPER[child] || [1, 1];
+      return [dia / 2 * k1, dia / 2 * k2];
+    });
+  }
+
+  // Tronc : suite de coupes elliptiques le long de la colonne (hanches → bassin → taille →
+  // poitrine → épaules). Le rendu est une silhouette lisse et pleine, qui suit la pose,
+  // au lieu d'un empilement de capsules qui s'écrasaient au bassin et au buste.
+  const TORSO_PROFILE = [
+    { at: 0.00, width: 0.170, depth: 0.165 },
+    { at: 0.16, width: 0.190, depth: 0.198 },   // bassin (renforcé par le bombé ci-dessous)
+    { at: 0.45, width: 0.158, depth: 0.172 },   // taille
+    { at: 0.70, width: 0.245, depth: 0.200 },   // bas des côtes
+    { at: 0.88, width: 0.215, depth: 0.195 },   // haut de la cage thoracique
+    { at: 1.00, width: 0.145, depth: 0.145 },   // raccord au cou
+  ];
+  // bombés anatomiques (gaussiennes le long du tronc) : hanches et épaules
+  const TORSO_BUMPS = [
+    { centre: 0.16, sigma: 0.15, scale: 1.05 },   // bassin
+    { centre: 0.90, sigma: 0.10, scale: 0.93 },   // ceinture scapulaire
+  ];
+  const TORSO_SLICES = 13;
+  const TORSO_RING = 14;
+  // os remplacés par le tronc en rendu 3D (ischions : le bassin les englobe)
+  const SKIP_IN_VOLUME = { hip_l: true, hip_r: true };
+  const CAP_JOINTS = ["elbow_l", "elbow_r", "knee_l", "knee_r", "wrist_l", "wrist_r", "ankle_l", "ankle_r"];
+
+  // Libellés du tableau de réglages (l'interface les affiche tels quels)
+  const SEGMENTS = [
+    { bone: "spine", label: "Tronc — bas du dos (taille)", group: "Tronc" },
+    { bone: "chest", label: "Tronc — poitrine", group: "Tronc" },
+    { bone: "neck", label: "Cou", group: "Tronc" },
+    { bone: "head", label: "Tête (cou → crâne)", group: "Tronc" },
+    { bone: "head_top", label: "Crâne (sommet)", group: "Tronc" },
+    { bone: "shoulder_l", label: "Clavicule gauche", group: "Bras gauche" },
+    { bone: "elbow_l", label: "Bras gauche (épaule → coude)", group: "Bras gauche" },
+    { bone: "wrist_l", label: "Avant-bras gauche", group: "Bras gauche" },
+    { bone: "hand_l", label: "Main gauche", group: "Bras gauche" },
+    { bone: "shoulder_r", label: "Clavicule droite", group: "Bras droit" },
+    { bone: "elbow_r", label: "Bras droit (épaule → coude)", group: "Bras droit" },
+    { bone: "wrist_r", label: "Avant-bras droit", group: "Bras droit" },
+    { bone: "hand_r", label: "Main droite", group: "Bras droit" },
+    { bone: "hip_l", label: "Hanche gauche (bassin)", group: "Jambe gauche" },
+    { bone: "knee_l", label: "Cuisse gauche", group: "Jambe gauche" },
+    { bone: "ankle_l", label: "Jambe gauche (genou → cheville)", group: "Jambe gauche" },
+    { bone: "toe_l", label: "Pied gauche", group: "Jambe gauche" },
+    { bone: "heel_l", label: "Talon gauche", group: "Jambe gauche" },
+    { bone: "hip_r", label: "Hanche droite (bassin)", group: "Jambe droite" },
+    { bone: "knee_r", label: "Cuisse droite", group: "Jambe droite" },
+    { bone: "ankle_r", label: "Jambe droite (genou → cheville)", group: "Jambe droite" },
+    { bone: "toe_r", label: "Pied droit", group: "Jambe droite" },
+    { bone: "heel_r", label: "Talon droit", group: "Jambe droite" },
+  ];
 
   // -------------------------------------------------------------- poses types
   // Directions de repos (normalisées) : les positions sont construites à partir des
@@ -256,10 +344,12 @@
     "hip_l", "knee_l", "ankle_l", "toe_l", "heel_l", "hip_r", "knee_r", "ankle_r", "toe_r", "heel_r"];
 
   /** Pose debout exacte, construite à partir des longueurs d'os. */
-  function defaultPose(opts) {
-    const lengths = boneLengths(opts);
+  function defaultPose(lengthsOrMorph) {
+    // un tableau de dimensions contient « spine » ; une morphologie contient « stature »
+    const estTableau = !!lengthsOrMorph && (lengthsOrMorph.spine !== undefined || lengthsOrMorph.hips !== undefined);
+    const lengths = estTableau ? Object.assign(boneLengths(), lengthsOrMorph) : boneLengths(lengthsOrMorph);
     const p = {};
-    p.hips = v(0, 0.96 * (opts && opts.stature || 1), 0);
+    p.hips = v(0, 0, 0);
     for (const name of BUILD_ORDER) {
       if (name === "hips") continue;
       const parent = PARENT[name];
@@ -267,7 +357,15 @@
       const rest = lengths[name] || 0;
       p[name] = add(p[parent], mul(norm(v(dir[0], dir[1], dir[2])), rest));
     }
+    // les pieds reposent sur le sol (y = 0)
+    const sol = Math.min(p.ankle_l.y, p.ankle_r.y, p.toe_l.y, p.toe_r.y, p.heel_l.y, p.heel_r.y);
+    for (const j in p) p[j] = v(p[j].x, p[j].y - sol + 0.015, p[j].z);
     return p;
+  }
+
+  /** Pose debout à partir d'une morphologie type (raccourci). */
+  function defaultPoseFromMorph(opts) {
+    return defaultPose(boneLengths(opts));
   }
 
   // Positions articulaires exprimées en angles/offsets relatifs au gabarit debout.
@@ -388,31 +486,66 @@
   // ------------------------------------------------------------- mannequin
   class Mannequin {
     constructor(opts) {
-      this.build = Object.assign({}, BUILDS.neutre, (opts && opts.build) || {});
-      this.lengths = boneLengths(this.build);
-      this.pose = defaultPose(this.build);
+      const o = opts || {};
+      const dims = morphedDimensions(o.morphology);
+      this.morphology = o.morphology || "neutre";
+      // dimensions FIXES du pantin : elles ne changent plus quand on pose un membre
+      this.lengths = Object.assign(dims.lengths, o.lengths || {});
+      this.thickness = Object.assign(dims.thickness, o.thickness || {});
+      this.pose = defaultPose(this.lengths);
       this.preset = "debout";
-      this.camera = { yaw: 0.22, pitch: 0.10, distance: 3.0, target: v(0, 0.85, 0) };
+      this.camera = { yaw: 0.42, pitch: 0.12, distance: 3.0, target: v(0, 0.85, 0) };
       this.selected = "wrist_l";
       this.style = (opts && opts.style) || "volume";   // volume | wireframe
       this.showHandles = true;                        // repères visibles seulement dans l'éditeur
     }
 
-    /**
-     * Change la morphologie. Par défaut la pose type est reconstruite ; avec
-     * ``{keepPose: true}`` la pose courante est conservée (les os prennent simplement
-     * leurs nouvelles longueurs), ce qui permet de régler les curseurs sans perdre
-     * le travail de pose.
-     */
-    setBuild(partial, opts) {
-      this.build = Object.assign({}, this.build, partial);
-      this.lengths = boneLengths(this.build);
-      if (opts && opts.keepPose) {
-        this.enforce();
-        this.fitCamera(560, 720, 1.1);
-      } else {
-        this.applyPreset(this.preset, true);
+    /** Dimensions du pantin (longueurs + épaisseurs), pour l'affichage/le partage. */
+    dimensions() {
+      return { lengths: Object.assign({}, this.lengths), thickness: Object.assign({}, this.thickness) };
+    }
+
+    /** Rayons des capsules, d'après les épaisseurs courantes. */
+    radii() {
+      return boneRadii(this.thickness);
+    }
+
+    /** Change les longueurs de segments (tableau de réglages) ; la pose est conservée. */
+    setLengths(partial, opts) {
+      for (const bone in partial) {
+        const value = Number(partial[bone]);
+        if (!isFinite(value) || value <= 0.005) continue;      // garde-fou : pas de segment nul
+        this.lengths[bone] = Math.min(3, value);
       }
+      // points du visage : ils restent solidaires de la tête
+      const h = this.lengths.head;
+      this.lengths.nose = 0.985 * h; this.lengths.eye_l = this.lengths.eye_r = 0.930 * h;
+      this.lengths.ear_l = this.lengths.ear_r = 0.625 * h;
+      if (!(opts && opts.keepPose)) this.applyPreset(this.preset);
+      else { this.enforce(); this.fitCamera(560, 720, 1.1); }
+      return this;
+    }
+
+    /** Change les épaisseurs (diamètre au milieu de chaque segment). */
+    setThickness(partial, opts) {
+      for (const bone in partial) {
+        const value = Number(partial[bone]);
+        if (!isFinite(value) || value <= 0.005) continue;
+        this.thickness[bone] = Math.min(1, value);
+      }
+      if (opts && opts.keepPose) this.fitCamera(560, 720, 1.1);
+      return this;
+    }
+
+    /** Remplit le tableau de réglages depuis une morphologie type. */
+    applyMorphology(name, opts) {
+      const preset = MORPHOLOGIES[name] || MORPHOLOGIES.neutre;
+      const scaled = morphedDimensions(preset);
+      this.morphology = MORPHOLOGIES[name] ? name : "neutre";
+      this.lengths = scaled.lengths;
+      this.thickness = scaled.thickness;
+      if (opts && opts.keepPose) { this.enforce(); this.fitCamera(560, 720, 1.1); }
+      else this.applyPreset(this.preset);
       return this;
     }
 
@@ -423,11 +556,10 @@
     /** Applique une pose type (réinitialise puis pose les décalages). */
     applyPreset(name, keepBuild) {
       const preset = PRESETS[name] || PRESETS.debout;
-      const base = defaultPose(this.build);
+      const base = defaultPose(this.lengths);
       this.pose = base;
-      this.lengths = boneLengths(this.build);
-      // les décalages sont exprimés dans le gabarit de référence : on les remet à l'échelle
-      const scale = (this.build.stature || 1);
+      // les décalages de la pose type sont exprimés en mètres : ils ne dépendent pas des dimensions
+      const scale = 1;
       for (const joint in preset) {
         const off = preset[joint];
         if (!base[joint]) continue;
@@ -442,6 +574,11 @@
         const dir = norm(sub(this.pose[n], this.pose[parent]));
         this.pose[n] = add(this.pose[parent], mul(dir, rest));
       });
+      // les chaînes de membres repassent par l'IK : le coude et le genou se placent
+      // toujours du bon côté, même si la pose type demande une position extrême
+      for (const ext of ["wrist_l", "wrist_r", "ankle_l", "ankle_r"]) {
+        this.moveJoint(ext, this.pose[ext]);
+      }
       this.preset = name;
       return this;
     }
@@ -654,60 +791,230 @@
       const draw = mode !== "silhouette" && mode !== "depth";
       if (draw) this.drawScene(ctx, width, height, { ground: m === "volume" });
 
-      const radii = boneRadii(this.build);
-      const parts = [];
+      const radii = this.radii();
       const projected = {};
       for (const j of JOINTS) projected[j] = project(this.pose[j], opts);
+
+      // éléments : volumes rigides, rotules, puis os (triés du plus loin au plus proche)
+      const items = this.collectItems(m, projected, radii, opts);
+      const skip = (m === "volume") ? SKIP_IN_VOLUME : {};
       BONES.forEach(([a, b], i) => {
-        parts.push({
-          a: projected[a], b: projected[b], r1: radii[i][0], r2: radii[i][1],
-          kind: BONES[i][4], depth: (projected[a].depth + projected[b].depth) / 2,
+        if (skip[b] || !projected[a] || !projected[b]) return;
+        items.push({
+          type: "bone", a: projected[a], b: projected[b], r1: radii[i][0], r2: radii[i][1],
+          part: BONES[i][4], depth: (projected[a].depth + projected[b].depth) / 2,
         });
       });
-      parts.sort((p, q) => q.depth - p.depth);          // peintre : loin → proche
+      items.sort((p, q) => q.depth - p.depth);
 
-      const depths = parts.map((p) => p.depth);
+      const depths = items.map((it) => it.depth);
       const dMin = Math.min.apply(null, depths), dMax = Math.max.apply(null, depths);
 
-      for (const part of parts) {
+      for (const it of items) {
+        if (it.type === "torso") { this.drawTorso(ctx, it, m); continue; }
+        if (it.type === "cap") {
+          const r = Math.max(1, it.r * it.p.scale);
+          if (m === "silhouette") ctx.fillStyle = "#ffffff";
+          else if (m === "depth") {
+            const t = dMax === dMin ? 0.5 : (it.depth - dMin) / (dMax - dMin);
+            const g = Math.round(255 - 205 * t);
+            ctx.fillStyle = `rgb(${g},${g},${g})`;
+          } else {
+            const grad = ctx.createLinearGradient(it.p.x - r, 0, it.p.x + r, 0);
+            grad.addColorStop(0, shade(COLORS.skin, 1.01));
+            grad.addColorStop(0.45, shade(COLORS.skin, 0.95));
+            grad.addColorStop(1, shade(COLORS.skin_dark, 0.94));
+            ctx.fillStyle = grad;
+          }
+          ctx.beginPath();
+          ctx.arc(it.p.x, it.p.y, r, 0, Math.PI * 2);
+          ctx.fill();
+          continue;
+        }
         if (m === "depth") {
-          const t = dMax === dMin ? 0.5 : (part.depth - dMin) / (dMax - dMin);
-          capsule(ctx, part.a, part.b, part.r1, part.r2,
+          const t = dMax === dMin ? 0.5 : (it.depth - dMin) / (dMax - dMin);
+          capsule(ctx, it.a, it.b, it.r1, it.r2,
             `rgb(${Math.round(255 - 200 * t)},${Math.round(255 - 200 * t)},${Math.round(255 - 200 * t)})`);
           continue;
         }
         if (m === "silhouette") {
-          capsule(ctx, part.a, part.b, part.r1, part.r2, "#ffffff");
+          capsule(ctx, it.a, it.b, it.r1, it.r2, "#ffffff");
           continue;
         }
         if (m === "wireframe") {
           ctx.save();
-          ctx.strokeStyle = LIMB_COLOR[part.kind] || "#8b93e8";
-          ctx.lineWidth = Math.max(2, part.r1 * part.a.scale * 1.2);
+          ctx.strokeStyle = LIMB_COLOR[it.part] || "#8b93e8";
+          ctx.lineWidth = Math.max(2, it.r1 * it.a.scale * 1.2);
           ctx.lineCap = "round";
           ctx.beginPath();
-          ctx.moveTo(part.a.x, part.a.y);
-          ctx.lineTo(part.b.x, part.b.y);
+          ctx.moveTo(it.a.x, it.a.y);
+          ctx.lineTo(it.b.x, it.b.y);
           ctx.stroke();
           ctx.restore();
           continue;
         }
         // volume : dégradé perpendiculaire à l'os (lumière venant du haut-gauche)
-        const dx = part.b.x - part.a.x, dy = part.b.y - part.a.y;
+        const dx = it.b.x - it.a.x, dy = it.b.y - it.a.y;
         const l = Math.max(1, Math.hypot(dx, dy));
         const nx = -dy / l, ny = dx / l;
-        const cx = (part.a.x + part.b.x) / 2, cy = (part.a.y + part.b.y) / 2;
-        const half = Math.max(part.r1 * part.a.scale, part.r2 * part.b.scale);
-        const depthT = dMax === dMin ? 0.5 : (part.depth - dMin) / (dMax - dMin);
-        const light = 0.98 + 0.10 * (1 - depthT);   // proche un peu plus clair
+        const cx = (it.a.x + it.b.x) / 2, cy = (it.a.y + it.b.y) / 2;
+        const half = Math.max(it.r1 * it.a.scale, it.r2 * it.b.scale);
+        const depthT = dMax === dMin ? 0.5 : (it.depth - dMin) / (dMax - dMin);
+        const light = 0.98 + 0.10 * (1 - depthT);
         const grad = ctx.createLinearGradient(cx + nx * half, cy + ny * half, cx - nx * half, cy - ny * half);
         grad.addColorStop(0, shade(COLORS.skin, light * 1.04));
         grad.addColorStop(0.45, shade(COLORS.skin, light * 0.95));
         grad.addColorStop(1, shade(COLORS.skin_dark, light * 0.88));
-        capsule(ctx, part.a, part.b, part.r1, part.r2, grad);
+        capsule(ctx, it.a, it.b, it.r1, it.r2, grad);
       }
       if ((m === "volume" || m === "wireframe") && this.showHandles !== false) this.drawHandles(ctx, projected, m);
       return projected;
+    }
+
+    // -------------------------------------------------------------- tronc
+    /** Repère local du tronc à une fraction f du chemin bassin → cou. */
+    torsoFrame(f) {
+      const chain = ["hips", "spine", "chest", "neck"];
+      // longueurs réelles des segments du tronc (elles suivent le tableau de réglages)
+      const weights = [this.lengths.spine, this.lengths.chest, this.lengths.neck];
+      const total = weights.reduce((a, b) => a + b, 0) || 1;
+      let reste = Math.max(0, Math.min(1, f)) * total, i = 0;
+      while (i < weights.length - 1 && reste > weights[i]) { reste -= weights[i]; i++; }
+      const t = weights[i] > 0 ? Math.max(0, Math.min(1, reste / weights[i])) : 0;
+      const A = this.pose[chain[i]], B = this.pose[chain[i + 1]];
+      const centre = lerp(A, B, t);
+      const axis = norm(sub(B, A));
+      // largeur : des hanches (en bas) aux épaules (en haut)
+      const bas = norm(sub(this.pose.hip_l, this.pose.hip_r));
+      const haut = norm(sub(this.pose.shoulder_l, this.pose.shoulder_r));
+      let x = norm(add(mul(bas, 1 - f), mul(haut, f)));
+      x = norm(sub(x, mul(axis, dot(x, axis))));
+      if (len(x) < 1e-6) x = norm(sub(this.pose.hip_l, this.pose.hip_r));
+      const z = norm(v(x.y * axis.z - x.z * axis.y, x.z * axis.x - x.x * axis.z, x.x * axis.y - x.y * axis.x));
+      return { centre: centre, axis: axis, x: x, z: z };
+    }
+
+    /** Dimensions du tronc à une fraction f (largeur/profondeur), d'après les réglages. */
+    torsoSize(f) {
+      const profil = TORSO_PROFILE;
+      let a = profil[0], b = profil[profil.length - 1];
+      for (let i = 0; i + 1 < profil.length; i++) {
+        if (f >= profil[i].at && f <= profil[i + 1].at) { a = profil[i]; b = profil[i + 1]; break; }
+      }
+      const t = b.at === a.at ? 0 : (f - a.at) / (b.at - a.at);
+      const interp = (k) => a[k] + (b[k] - a[k]) * t;
+      // mise à l'échelle : épaisseurs réglées dans le tableau + largeurs réelles
+      const girth = (this.thickness.spine + this.thickness.chest) / (BASE_THICK.spine + BASE_THICK.chest);
+      let width = interp("width") * girth;
+      const epaules = dist(this.pose.shoulder_l, this.pose.shoulder_r) + 0.05;
+      const hanches = dist(this.pose.hip_l, this.pose.hip_r) + 0.09;
+      const refs = [hanches, epaules];
+      TORSO_BUMPS.forEach((bump, i) => {
+        const g = Math.exp(-Math.pow((f - bump.centre) / bump.sigma, 2));
+        width = Math.max(width, refs[i] * bump.scale * Math.max(0.12, g));
+      });
+      const retrecissement = 1 - 0.25 * Math.max(0, Math.min(1, (f - 0.95) / 0.05));
+      return { width: width * retrecissement, depth: interp("depth") * girth * retrecissement };
+    }
+
+    /** Points 3D de la coupe f (anneau elliptique). */
+    torsoRing(f) {
+      const frame = this.torsoFrame(f);
+      const taille = this.torsoSize(f);
+      const pts = [];
+      for (let i = 0; i < TORSO_RING; i++) {
+        const th = (i / TORSO_RING) * Math.PI * 2;
+        pts.push(add(frame.centre, add(mul(frame.x, Math.cos(th) * taille.width / 2),
+          mul(frame.z, Math.sin(th) * taille.depth / 2))));
+      }
+      return { pts: pts, centre: frame.centre, size: taille };
+    }
+
+    /** Élément « tronc » à dessiner (silhouette lissée + profondeur moyenne). */
+    torsoItem(opts) {
+      const rings = [];
+      for (let i = 0; i < TORSO_SLICES; i++) {
+        const f = i / (TORSO_SLICES - 1);
+        const ring = this.torsoRing(f);
+        const proj = ring.pts.map((p) => project(p, opts));
+        let gauche = proj[0], droite = proj[0];
+        for (const p of proj) {
+          if (p.x < gauche.x) gauche = p;
+          if (p.x > droite.x) droite = p;
+        }
+        rings.push({ f: f, proj: proj, gauche: gauche, droite: droite, centre: project(ring.centre, opts) });
+      }
+      const depth = rings.reduce((acc, r) => acc + r.centre.depth, 0) / rings.length;
+      return { type: "torso", rings: rings, depth: depth };
+    }
+
+    /** Dessine le tronc : silhouette (chaîne gauche + chaîne droite) remplie et ombrée. */
+    drawTorso(ctx, item, mode) {
+      const points = [];
+      for (const r of item.rings) points.push(r.droite);
+      for (let i = item.rings.length - 1; i >= 0; i--) points.push(item.rings[i].gauche);
+      if (points.length < 3) return;
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (const p of points) {
+        minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+        minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+      }
+      ctx.beginPath();
+      points.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      ctx.closePath();
+      if (mode === "silhouette") {
+        ctx.fillStyle = "#ffffff";
+      } else if (mode === "depth") {
+        const t = Math.max(0, Math.min(1, (item.depth - (this.camera.distance - 0.7)) / 1.4));
+        const g = Math.round(255 - 205 * (1 - t));
+        ctx.fillStyle = `rgb(${g},${g},${g})`;
+      } else {
+        // lumière venue de la gauche : dégradé horizontal + léger modelé vertical
+        const grad = ctx.createLinearGradient(minX, 0, maxX, 0);
+        grad.addColorStop(0, shade(COLORS.skin, 1.02));
+        grad.addColorStop(0.42, shade(COLORS.skin, 0.97));
+        grad.addColorStop(1, shade(COLORS.skin_dark, 0.92));
+        ctx.fillStyle = grad;
+      }
+      ctx.fill();
+      if (mode === "volume") {
+        // ceinture un peu marquée (taille) + ombre sous les côtes : lecture anatomique
+        const waist = item.rings.reduce((a, r) => (Math.abs(r.f - 0.45) < Math.abs(a.f - 0.45) ? r : a), item.rings[0]);
+        const cotes = item.rings.reduce((a, r) => (Math.abs(r.f - 0.72) < Math.abs(a.f - 0.72) ? r : a), item.rings[0]);
+        ctx.save();
+        ctx.strokeStyle = "rgba(0,0,0,.10)";
+        ctx.lineWidth = Math.max(2, waist.centre.scale * 0.02);
+        ctx.beginPath();
+        ctx.moveTo(waist.gauche.x, waist.gauche.y);
+        ctx.lineTo(waist.droite.x, waist.droite.y);
+        ctx.stroke();
+        ctx.restore();
+        void cotes;
+      }
+    }
+
+    /** Rotule (sphère) à une articulation : évite les découpes entre deux segments. */
+    capRadius(joint, radii) {
+      let best = 0;
+      BONES.forEach(([, child], i) => {
+        if (PARENT[child] !== joint) return;
+        best = Math.max(best, Math.min(radii[i][0], radii[i][1]));
+      });
+      return best * 0.99;
+    }
+
+    collectItems(mode, projected, radii, opts) {
+      const items = [];
+      if (mode === "volume" || mode === "silhouette" || mode === "depth") {
+        items.push(this.torsoItem(opts));
+        for (const joint of CAP_JOINTS) {
+          const r = this.capRadius(joint, radii);
+          if (r > 0 && projected[joint]) {
+            items.push({ type: "cap", p: projected[joint], r: r, depth: projected[joint].depth - 0.002 });
+          }
+        }
+      }
+      return items;
     }
 
     /** Petits repères sur les articulations (pour l'édition). */
@@ -771,11 +1078,13 @@
     toJSON() {
       const pose = {};
       for (const j of JOINTS) pose[j] = [Number(this.pose[j].x.toFixed(4)), Number(this.pose[j].y.toFixed(4)), Number(this.pose[j].z.toFixed(4))];
-      return { version: 1, build: this.build, pose: pose, camera: { yaw: this.camera.yaw, pitch: this.camera.pitch, distance: this.camera.distance }, preset: this.preset };
+      return { version: 2, morphology: this.morphology, lengths: Object.assign({}, this.lengths),
+        thickness: Object.assign({}, this.thickness), pose: pose,
+        camera: { yaw: this.camera.yaw, pitch: this.camera.pitch, distance: this.camera.distance }, preset: this.preset };
     }
 
     static fromJSON(data) {
-      const mannequin = new Mannequin({ build: data.build });
+      const mannequin = new Mannequin({ morphology: data.morphology, lengths: data.lengths, thickness: data.thickness });
       for (const j in data.pose || {}) {
         if (mannequin.pose[j]) mannequin.pose[j] = v(data.pose[j][0], data.pose[j][1], data.pose[j][2]);
       }
@@ -791,8 +1100,10 @@
   }
 
   const api = {
-    Mannequin, JOINTS, BONES, PARENT, PRESETS, BUILDS, OPENPOSE_18, OPENPOSE_LIMBS, OPENPOSE_COLORS,
-    boneLengths, boneRadii, defaultPose, solveTwoBoneIK, enforceBoneLengths, project, capsule,
+    Mannequin, JOINTS, BONES, PARENT, PRESETS, BUILDS, MORPHOLOGIES, SEGMENTS, TORSO_PROFILE,
+    BASE_LENGTHS, BASE_THICK, OPENPOSE_18, OPENPOSE_LIMBS, OPENPOSE_COLORS,
+    boneLengths, boneThickness, boneRadii, morphedDimensions, defaultPose, solveTwoBoneIK,
+    enforceBoneLengths, project, capsule,
     v, sub, add, mul, norm, dist, len,
   };
   if (typeof module === "object" && module.exports) module.exports = api;

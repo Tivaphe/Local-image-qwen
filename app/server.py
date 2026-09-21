@@ -364,7 +364,10 @@ def control_pose(p: PoseIn):
 # --------------------------------------------------------------- mannequin
 class MannequinIn(BaseModel):
     pose: dict = {}              # {articulation: [x, y, z]} en mètres
-    build: dict = {}             # {stature, shoulders, legs, arms, build}
+    lengths: dict = {}           # {segment: longueur en mètres} — tableau des dimensions
+    thickness: dict = {}         # {segment: épaisseur en mètres} — diamètre au milieu
+    morphology: str = ""         # morphologie de départ : neutre|fin|athletique|fort|femme
+    build: dict = {}             # ancien nom des proportions (conservé)
     camera: dict = {}            # {yaw, pitch, distance, target}
     mode: str = "volume"         # volume | wireframe | openpose | depth | silhouette
     width: int = 768
