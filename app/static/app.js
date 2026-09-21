@@ -463,6 +463,9 @@ function setMode(m) {
   const col = $("#editCard").parentElement;
   if (editing) col.prepend($("#editCard"));
   else col.insertBefore($("#editCard"), $("#formatRow"));
+  // en modification d'image avec un modèle ControlNet : on repart de la photo par défaut,
+  // pour garder la personne (couleurs, identité) tout en suivant la pose détectée
+  if (editing && controlCapable() && !CONTROL.id) $("#useInit").checked = true;
 }
 $("#modeGen").onclick = () => setMode("generate");
 $("#modeEdit").onclick = () => setMode("edit");

@@ -99,6 +99,7 @@ details.files>summary{cursor:pointer;color:var(--muted);font-size:13.5px}
 #poseEditor{margin-top:10px;border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--panel2)}
 #poseCanvas{width:100%;max-width:520px;height:auto;border-radius:8px;background:#0a0c10;cursor:crosshair;touch-action:none;display:block}
 #poseEditor .row{align-items:center}
+.card.dim #controlBody{opacity:.62}                /* modèle actif sans ControlNet : carte en retrait */
 .pose-tip{color:#c9bbff}
 .tag.kpt{background:#2b2550;color:#c9bbff;margin-left:4px}
 #controlStatus.ok{color:var(--ok)}
