@@ -177,9 +177,7 @@ def morphed_dimensions(morphology: str = "neutre") -> tuple[dict, dict]:
     o.update(MORPHOLOGIES.get(morphology) or {})
     lengths, thickness = {}, {}
     for bone, base in BASE_LENGTHS.items():
-        f = float(o["stature"])
-        if bone in ("spine", "chest"):
-            f *= float(o["stature"])          # le tronc suit la taille
+        f = float(o["stature"])               # tout le squelette suit la stature
         if bone.endswith("_l") or bone.endswith("_r"):
             if bone.startswith("shoulder"):
                 f *= float(o["shoulders"])
@@ -218,8 +216,6 @@ def bone_lengths(build: dict | None = None) -> dict:
     o = dict(MORPHOLOGIES["neutre"])
     o.update(build or {})
     lengths = {k: v * float(o["stature"]) for k, v in BASE_LENGTHS.items()}
-    lengths["chest"] *= float(o["stature"])
-    lengths["spine"] *= float(o["stature"])
     for side in ("l", "r"):
         lengths["shoulder_" + side] *= float(o["shoulders"])
         lengths["elbow_" + side] *= float(o["arms"])

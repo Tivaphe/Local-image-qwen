@@ -224,8 +224,7 @@
     const lengths = {}, thickness = {};
     for (const bone in BASE_LENGTHS) {
       const side = bone.slice(-2);
-      let f = o.stature;
-      if (bone === "spine" || bone === "chest") f *= o.stature;   // le tronc suit la taille
+      let f = o.stature;                                          // tout le squelette suit la stature
       if (side === "_l" || side === "_r") {
         if (bone.startsWith("shoulder")) f *= o.shoulders;
         if (bone.startsWith("elbow") || bone.startsWith("wrist")) f *= o.arms;
