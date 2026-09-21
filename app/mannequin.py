@@ -207,6 +207,9 @@ def _with_face(lengths: dict) -> dict:
 
 def bone_lengths(build: dict | None = None) -> dict:
     """Longueurs d'os (mètres) — par morphologie (compatibilité) ou valeurs explicites."""
+    if isinstance(build, dict) and "lengths" in build:
+        # résultat de validate() : le tableau des dimensions fait foi
+        return _with_face(dict(build["lengths"]))
     if build and any(k in build for k in BASE_LENGTHS):
         out = {k: float(v) for k, v in build.items() if k in BASE_LENGTHS}
         for bone, base in BASE_LENGTHS.items():

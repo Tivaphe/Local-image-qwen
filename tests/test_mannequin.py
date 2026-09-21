@@ -325,6 +325,19 @@ def test_api_rendu_refuse_un_mode_inconnu(client):
     assert "hologramme" in r.json()["detail"]
 
 
+def test_api_pose_renvoie_les_dimensions_du_tableau(client):
+    """/api/mannequin/pose renvoie les longueurs réglées (pas celles de la morphologie type)."""
+    r = client.post("/api/mannequin/pose", json={"pose": {}, "lengths": {"knee_l": 0.5, "chest": 0.24},
+                                                 "thickness": {"chest": 0.36}, "morphology": "femme"})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["lengths"]["knee_l"] == pytest.approx(0.5, abs=1e-4)
+    assert data["lengths"]["chest"] == pytest.approx(0.24, abs=1e-4)
+    assert data["lengths"]["knee_r"] == pytest.approx(mannequin.morphed_dimensions("femme")[0]["knee_r"], abs=1e-4)
+    assert data["lengths"]["nose"] == pytest.approx(0.985 * data["lengths"]["head"], abs=1e-4)
+    assert len(data["points"]) == 18
+
+
 def test_api_pose_renvoie_longueurs_et_points(client):
     r = client.post("/api/mannequin/pose", json={"pose": {}, "width": 384, "height": 512})
     assert r.status_code == 200

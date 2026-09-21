@@ -209,7 +209,7 @@ de bons réglages de départ.
 
 ```bash
 pip install -r requirements-dev.txt     # pytest + httpx
-python -m pytest -q                     # 89 tests : catalogue, téléchargements, API, pose, mannequin, commande sd-cli
+python -m pytest -q                     # 90 tests : catalogue, téléchargements, API, pose, mannequin, commande sd-cli
 
 npm install jsdom                       # une seule fois, pour les tests d'interface
 node tests/ui_render.mjs                # rejoue app.js sur un vrai /api/status (serveur lancé)
