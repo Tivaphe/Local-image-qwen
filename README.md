@@ -15,7 +15,7 @@ Les trois font de la génération **et** de l'édition d'image (image(s) de réf
 
 - Zéro dépendance lourde : pas de PyTorch, pas de CUDA toolkit à installer.
 - Le moteur (binaire précompilé) et les modèles se téléchargent **en un clic depuis l'interface**.
-- Texte → image et **édition d'image** (image(s) de référence + instruction).
+- Texte → image et **édition d'image** (glisser-déposer de références, conservation automatique ou manuelle du format et du ratio de l'image source, choix de ratios étendus 1:1, 4:3, 3:2, 16:9, 21:9…, verrouillage de ratio et inversion rapide).
 - Galerie avec seed, réglages, réutilisation en un clic.
 - Fonctionne sous **Windows / Linux / macOS**, GPU NVIDIA (CUDA), AMD (ROCm/Vulkan), Intel (Vulkan) ou CPU.
 - Tout fichier `.gguf` déposé dans `models/<modèle>/diffusion/` est utilisable : vous choisissez librement votre variante (fine‑tune, autre quantification, etc.) via un bouton radio.

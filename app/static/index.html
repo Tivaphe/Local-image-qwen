@@ -39,28 +39,75 @@
         <textarea id="negative" rows="2" placeholder="flou, basse qualité, texte illisible…"></textarea>
       </details>
 
-      <div class="card">
+      <div class="card" id="editCard">
         <div class="card-title">Édition d'image (optionnel)</div>
         <p class="hint">Ajoutez une ou plusieurs images de référence et décrivez la modification dans le prompt (ex : « change la couleur du ciel en rose »). État pour ce modèle : <span id="editStatus">?</span>.</p>
-        <input type="file" id="refs" accept="image/*" multiple>
-        <div id="refPreview" class="refs"></div>
+        
+        <div id="dropZone" class="drop-zone" title="Cliquez ou glissez une image ici">
+          <input type="file" id="refs" accept="image/*" multiple class="file-input-hidden">
+          <div class="drop-zone-content">
+            <span class="drop-icon">🖼️</span>
+            <span>Glissez-déposez une ou plusieurs images ici, ou <span class="drop-browse">parcourez</span></span>
+            <span class="small">PNG, JPG, WebP…</span>
+          </div>
+        </div>
+
+        <div id="refControls" class="ref-controls hidden">
+          <label class="check small">
+            <input type="checkbox" id="autoAdaptFormat" checked>
+            Garder automatiquement le format de l'image source
+          </label>
+          <button type="button" id="btnClearRefs" class="ghost small">✕ Tout effacer</button>
+        </div>
+
+        <div id="refPreview" class="refs-list"></div>
       </div>
 
-      <div class="grid2">
-        <label>Format
+      <div class="card format-card">
+        <div class="row">
+          <label class="format-title">Format / Ratio</label>
+          <span id="ratioInfo" class="badge-ratio">1:1 · 1.05 MP</span>
+        </div>
+
+        <div class="preset-wrap">
           <select id="preset">
-            <option value="1024x1024">Carré 1:1 (1024×1024)</option>
-            <option value="1152x864">Paysage 4:3 (1152×864)</option>
-            <option value="864x1152">Portrait 3:4 (864×1152)</option>
-            <option value="1344x768">Paysage 16:9 (1344×768)</option>
-            <option value="768x1344">Portrait 9:16 (768×1344)</option>
-            <option value="768x768">Rapide 768×768</option>
+            <optgroup id="sourcePresetGroup" label="📐 Format de l'image source" class="hidden">
+              <option value="source-ratio" id="optSourceRatio">📐 Conserver le ratio source (~1 MP : …)</option>
+              <option value="source-exact" id="optSourceExact">📏 Dimensions source d'origine (…)</option>
+            </optgroup>
+            <optgroup label="Ratios standards (~1 MP)">
+              <option value="1024x1024">Carré 1:1 (1024×1024)</option>
+              <option value="1152x864">Paysage 4:3 (1152×864)</option>
+              <option value="864x1152">Portrait 3:4 (864×1152)</option>
+              <option value="1248x832">Paysage 3:2 (1248×832)</option>
+              <option value="832x1248">Portrait 2:3 (832×1248)</option>
+              <option value="1344x768">Paysage 16:9 (1344×768)</option>
+              <option value="768x1344">Portrait 9:16 (768×1344)</option>
+              <option value="1536x640">Cinéma 21:9 (1536×640)</option>
+              <option value="640x1536">Bannière 9:21 (640×1536)</option>
+            </optgroup>
+            <optgroup label="Formats rapides (~0.6 MP)">
+              <option value="768x768">Rapide 1:1 (768×768)</option>
+              <option value="1024x576">Rapide 16:9 (1024×576)</option>
+              <option value="896x672">Rapide 4:3 (896×672)</option>
+            </optgroup>
             <option value="custom">Personnalisé…</option>
           </select>
-        </label>
-        <div class="grid2 compact">
-          <label>Largeur <input type="number" id="width" step="32" min="256" max="2048" value="1024"></label>
-          <label>Hauteur <input type="number" id="height" step="32" min="256" max="2048" value="1024"></label>
+        </div>
+
+        <div class="dims-row">
+          <div class="dim-col">
+            <label for="width">Largeur <span class="small">(px)</span></label>
+            <input type="number" id="width" step="32" min="256" max="2048" value="1024">
+          </div>
+          <div class="dim-tools">
+            <button type="button" id="btnSwapDims" class="tool-btn" title="Inverser largeur et hauteur (paysage ⇄ portrait)">⇄</button>
+            <button type="button" id="btnLockRatio" class="tool-btn" title="Verrouiller le ratio">🔓</button>
+          </div>
+          <div class="dim-col">
+            <label for="height">Hauteur <span class="small">(px)</span></label>
+            <input type="number" id="height" step="32" min="256" max="2048" value="1024">
+          </div>
         </div>
       </div>
 

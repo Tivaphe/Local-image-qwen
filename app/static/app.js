@@ -177,23 +177,368 @@ function renderJobs() {
   }).join("");
 }
 
-// ------------------------------------------------------------- formulaire
+// ------------------------------------------------------------- formulaire & format
+const KNOWN_RATIOS = [
+  { label: "1:1", name: "Carré 1:1", ratio: 1.0, w: 1024, h: 1024 },
+  { label: "4:3", name: "Paysage 4:3", ratio: 4 / 3, w: 1152, h: 864 },
+  { label: "3:4", name: "Portrait 3:4", ratio: 3 / 4, w: 864, h: 1152 },
+  { label: "3:2", name: "Paysage 3:2", ratio: 3 / 2, w: 1248, h: 832 },
+  { label: "2:3", name: "Portrait 2:3", ratio: 2 / 3, w: 832, h: 1248 },
+  { label: "16:9", name: "Paysage 16:9", ratio: 16 / 9, w: 1344, h: 768 },
+  { label: "9:16", name: "Portrait 9:16", ratio: 9 / 16, w: 768, h: 1344 },
+  { label: "21:9", name: "Cinéma 21:9", ratio: 21 / 9, w: 1536, h: 640 },
+  { label: "9:21", name: "Bannière 9:21", ratio: 9 / 21, w: 640, h: 1536 },
+];
+
+function getRatioLabel(w, h) {
+  if (!w || !h) return "1:1";
+  const r = w / h;
+  for (const k of KNOWN_RATIOS) {
+    if (Math.abs(r - k.ratio) / k.ratio < 0.035) return k.label;
+  }
+  return r >= 1 ? `${r.toFixed(2)}:1` : `1:${(1 / r).toFixed(2)}`;
+}
+
+function calculateOptimalSourceDimensions(origW, origH, targetArea = 1048576) {
+  const targetRatio = origW / origH;
+  for (const k of KNOWN_RATIOS) {
+    if (Math.abs(targetRatio - k.ratio) / k.ratio < 0.025) {
+      return { width: k.w, height: k.h, ratioLabel: k.label };
+    }
+  }
+  let bestW = 1024, bestH = 1024, minDiff = Infinity;
+  for (let w = 256; w <= 2048; w += 32) {
+    let h = Math.round((w / targetRatio) / 32) * 32;
+    h = Math.max(256, Math.min(2048, h));
+    const area = w * h;
+    const r = w / h;
+    const diff = Math.abs(Math.log(r / targetRatio)) * 3.0 + Math.abs(Math.log(area / targetArea));
+    if (diff < minDiff) {
+      minDiff = diff;
+      bestW = w;
+      bestH = h;
+    }
+  }
+  return { width: bestW, height: bestH, ratioLabel: getRatioLabel(origW, origH) };
+}
+
+function calculateExactSourceDimensions(origW, origH) {
+  let scale = 1.0;
+  if (origW > 2048 || origH > 2048) {
+    scale = Math.min(2048 / origW, 2048 / origH);
+  } else if (origW < 256 && origH < 256) {
+    scale = Math.max(256 / origW, 256 / origH);
+  }
+  const w = Math.max(256, Math.min(2048, Math.round((origW * scale) / 32) * 32));
+  const h = Math.max(256, Math.min(2048, Math.round((origH * scale) / 32) * 32));
+  return { width: w, height: h };
+}
+
+let isRatioLocked = false;
+let lockedRatio = 1.0;
+let refItems = [];
+let activeSourceId = null;
+
+function getActiveSource() {
+  return refItems.find((r) => r.id === activeSourceId) || refItems[0] || null;
+}
+
+function updateRatioInfo(w, h) {
+  const badge = $("#ratioInfo");
+  if (!badge) return;
+  const label = getRatioLabel(w, h);
+  const mp = ((w * h) / 1e6).toFixed(2);
+  badge.textContent = `${label} · ${mp} MP`;
+}
+
+function applyDimensions(w, h, updatePresetSelect = true) {
+  w = Math.max(256, Math.min(2048, Math.round(w / 32) * 32));
+  h = Math.max(256, Math.min(2048, Math.round(h / 32) * 32));
+  $("#width").value = w;
+  $("#height").value = h;
+  lockedRatio = w / h;
+  if (updatePresetSelect) {
+    syncPreset();
+  } else {
+    updateRatioInfo(w, h);
+  }
+  renderRefList();
+}
+
+function syncPreset() {
+  const w = parseInt($("#width").value, 10);
+  const h = parseInt($("#height").value, 10);
+  lockedRatio = (w && h) ? (w / h) : 1.0;
+  const active = getActiveSource();
+
+  if (active) {
+    if (w === active.optimal.width && h === active.optimal.height) {
+      $("#preset").value = "source-ratio";
+      updateRatioInfo(w, h);
+      renderRefList();
+      return;
+    }
+    if (w === active.exact.width && h === active.exact.height) {
+      $("#preset").value = "source-exact";
+      updateRatioInfo(w, h);
+      renderRefList();
+      return;
+    }
+  }
+
+  const v = `${w}x${h}`;
+  const exists = [...$("#preset").options].some((o) => o.value === v);
+  $("#preset").value = exists ? v : "custom";
+  updateRatioInfo(w, h);
+  renderRefList();
+}
+
 $("#steps").oninput = (e) => ($("#stepsVal").textContent = e.target.value);
 $("#cfg").oninput = (e) => ($("#cfgVal").textContent = Number(e.target.value).toFixed(1));
+
 $("#preset").onchange = (e) => {
-  if (e.target.value === "custom") return;
-  const [w, h] = e.target.value.split("x");
-  $("#width").value = w; $("#height").value = h;
+  const val = e.target.value;
+  if (val === "custom") return;
+  const active = getActiveSource();
+  if (val === "source-ratio" && active) {
+    applyDimensions(active.optimal.width, active.optimal.height, false);
+    return;
+  }
+  if (val === "source-exact" && active) {
+    applyDimensions(active.exact.width, active.exact.height, false);
+    return;
+  }
+  const parts = val.split("x").map(Number);
+  if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+    applyDimensions(parts[0], parts[1], false);
+  }
 };
-function syncPreset() {
-  const v = `${$("#width").value}x${$("#height").value}`;
-  $("#preset").value = [...$("#preset").options].some((o) => o.value === v) ? v : "custom";
+
+$("#btnSwapDims").onclick = () => {
+  const w = parseInt($("#width").value, 10);
+  const h = parseInt($("#height").value, 10);
+  $("#width").value = h;
+  $("#height").value = w;
+  lockedRatio = h / w;
+  syncPreset();
+};
+
+$("#btnLockRatio").onclick = () => {
+  isRatioLocked = !isRatioLocked;
+  $("#btnLockRatio").classList.toggle("active", isRatioLocked);
+  $("#btnLockRatio").textContent = isRatioLocked ? "🔒" : "🔓";
+  $("#btnLockRatio").title = isRatioLocked ? "Ratio verrouillé (cliquer pour déverrouiller)" : "Verrouiller le ratio";
+  if (isRatioLocked) {
+    const w = parseInt($("#width").value, 10) || 1024;
+    const h = parseInt($("#height").value, 10) || 1024;
+    lockedRatio = w / h;
+  }
+};
+
+$("#width").oninput = $("#width").onchange = (e) => {
+  const w = parseInt(e.target.value, 10);
+  if (isRatioLocked && w && lockedRatio) {
+    const newH = Math.max(256, Math.min(2048, Math.round((w / lockedRatio) / 32) * 32));
+    $("#height").value = newH;
+  }
+  syncPreset();
+};
+
+$("#height").oninput = $("#height").onchange = (e) => {
+  const h = parseInt(e.target.value, 10);
+  if (isRatioLocked && h && lockedRatio) {
+    const newW = Math.max(256, Math.min(2048, Math.round((h * lockedRatio) / 32) * 32));
+    $("#width").value = newW;
+  }
+  syncPreset();
+};
+
+// ------------------------------------------------------------- gestion des références & drop
+function updateSourcePresetGroup() {
+  const group = $("#sourcePresetGroup");
+  const active = getActiveSource();
+  if (!active) {
+    group.classList.add("hidden");
+    return;
+  }
+  group.classList.remove("hidden");
+  $("#optSourceRatio").textContent = `📐 Conserver le ratio source (~1 MP : ${active.optimal.width}×${active.optimal.height})`;
+  $("#optSourceExact").textContent = `📏 Dimensions source d'origine (${active.exact.width}×${active.exact.height})`;
 }
-$("#width").onchange = $("#height").onchange = syncPreset;
-$("#refs").onchange = () => {
-  const box = $("#refPreview");
-  box.innerHTML = "";
-  [...$("#refs").files].forEach((f) => { const img = document.createElement("img"); img.src = URL.createObjectURL(f); box.appendChild(img); });
+
+function renderRefList() {
+  const list = $("#refPreview");
+  const controls = $("#refControls");
+  list.innerHTML = "";
+  if (!refItems.length) {
+    controls.classList.add("hidden");
+    updateSourcePresetGroup();
+    return;
+  }
+  controls.classList.remove("hidden");
+  updateSourcePresetGroup();
+
+  const currentW = parseInt($("#width").value, 10);
+  const currentH = parseInt($("#height").value, 10);
+  const active = getActiveSource();
+
+  refItems.forEach((item) => {
+    const card = document.createElement("div");
+    const isActiveSource = active && active.id === item.id;
+    card.className = `ref-card ${isActiveSource ? "active-format" : ""}`;
+
+    const isOptActive = isActiveSource && currentW === item.optimal.width && currentH === item.optimal.height;
+    const isExactActive = isActiveSource && currentW === item.exact.width && currentH === item.exact.height;
+
+    card.innerHTML = `
+      <img src="${item.url}" class="ref-thumb" alt="${item.file.name}">
+      <div class="ref-info">
+        <div class="ref-name" title="${item.file.name}">${item.file.name}</div>
+        <div class="ref-meta">
+          <span>${item.origW} × ${item.origH} px</span>
+          <span class="badge-ratio-mini">${item.ratioLabel}</span>
+          ${isActiveSource ? '<span class="tag ok" style="font-size:10px;padding:1px 5px">Format actif</span>' : ""}
+        </div>
+        <div class="ref-actions">
+          <button type="button" class="btn-ref-opt btn-apply-opt ${isOptActive ? "active" : ""}" title="Adapter au ratio source (~1 MP, aligné 32px)">📐 Ratio adapté (${item.optimal.width}×${item.optimal.height})</button>
+          <button type="button" class="btn-ref-opt btn-apply-exact ${isExactActive ? "active" : ""}" title="Conserver les dimensions d'origine (arrondies à 32px)">📏 Taille originale (${item.exact.width}×${item.exact.height})</button>
+        </div>
+      </div>
+      <button type="button" class="btn-ref-remove" title="Supprimer cette référence">✕</button>
+    `;
+
+    card.querySelector(".btn-apply-opt").onclick = () => {
+      activeSourceId = item.id;
+      applyDimensions(item.optimal.width, item.optimal.height, false);
+      $("#preset").value = "source-ratio";
+      updateSourcePresetGroup();
+      renderRefList();
+    };
+
+    card.querySelector(".btn-apply-exact").onclick = () => {
+      activeSourceId = item.id;
+      applyDimensions(item.exact.width, item.exact.height, false);
+      $("#preset").value = "source-exact";
+      updateSourcePresetGroup();
+      renderRefList();
+    };
+
+    card.querySelector(".btn-ref-remove").onclick = () => {
+      removeRefItem(item.id);
+    };
+
+    list.appendChild(card);
+  });
+}
+
+function removeRefItem(id) {
+  const idx = refItems.findIndex((it) => it.id === id);
+  if (idx !== -1) {
+    URL.revokeObjectURL(refItems[idx].url);
+    refItems.splice(idx, 1);
+  }
+  if (activeSourceId === id) {
+    activeSourceId = refItems[0]?.id || null;
+  }
+  if (!refItems.length) {
+    const curPreset = $("#preset").value;
+    if (curPreset === "source-ratio" || curPreset === "source-exact") {
+      $("#preset").value = "1024x1024";
+      applyDimensions(1024, 1024);
+    }
+  }
+  renderRefList();
+}
+
+function handleNewFiles(files) {
+  const fileArray = Array.from(files).filter((f) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|bmp|gif)$/i.test(f.name));
+  if (!fileArray.length) return;
+
+  let loadedCount = 0;
+  const isFirstUpload = refItems.length === 0;
+
+  fileArray.forEach((file) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const origW = img.naturalWidth;
+      const origH = img.naturalHeight;
+      const optimal = calculateOptimalSourceDimensions(origW, origH);
+      const exact = calculateExactSourceDimensions(origW, origH);
+      const ratioLabel = getRatioLabel(origW, origH);
+      const item = {
+        id: Math.random().toString(36).slice(2) + Date.now().toString(36),
+        file,
+        url,
+        origW,
+        origH,
+        ratioLabel,
+        optimal,
+        exact,
+      };
+      refItems.push(item);
+      if (!activeSourceId) {
+        activeSourceId = item.id;
+      }
+      loadedCount++;
+      if (loadedCount === fileArray.length) {
+        if (isFirstUpload && $("#autoAdaptFormat")?.checked) {
+          const first = getActiveSource();
+          if (first) {
+            applyDimensions(first.optimal.width, first.optimal.height, false);
+            $("#preset").value = "source-ratio";
+          }
+        }
+        renderRefList();
+      }
+    };
+    img.onerror = () => {
+      loadedCount++;
+      if (loadedCount === fileArray.length) renderRefList();
+    };
+    img.src = url;
+  });
+}
+
+// Zone de glisser-déposer
+const dropZone = $("#dropZone");
+if (dropZone) {
+  dropZone.onclick = (e) => {
+    if (e.target.id !== "refs") $("#refs").click();
+  };
+  dropZone.ondragover = (e) => {
+    e.preventDefault();
+    dropZone.classList.add("dragover");
+  };
+  dropZone.ondragleave = () => {
+    dropZone.classList.remove("dragover");
+  };
+  dropZone.ondrop = (e) => {
+    e.preventDefault();
+    dropZone.classList.remove("dragover");
+    if (e.dataTransfer?.files?.length) {
+      handleNewFiles(e.dataTransfer.files);
+    }
+  };
+}
+
+$("#refs").onchange = (e) => {
+  if (e.target.files?.length) {
+    handleNewFiles(e.target.files);
+    e.target.value = "";
+  }
+};
+
+$("#btnClearRefs").onclick = () => {
+  refItems.forEach((it) => URL.revokeObjectURL(it.url));
+  refItems = [];
+  activeSourceId = null;
+  const curPreset = $("#preset").value;
+  if (curPreset === "source-ratio" || curPreset === "source-exact") {
+    $("#preset").value = "1024x1024";
+    applyDimensions(1024, 1024);
+  }
+  renderRefList();
 };
 
 $("#btnGenerate").onclick = async () => {
@@ -206,7 +551,7 @@ $("#btnGenerate").onclick = async () => {
   fd.append("cfg_scale", $("#cfg").value);
   fd.append("sampler", $("#sampler").value);
   fd.append("seed", $("#seed").value);
-  [...$("#refs").files].forEach((f) => fd.append("ref_images", f));
+  refItems.forEach((it) => fd.append("ref_images", it.file));
   $("#errorBox").classList.add("hidden");
   try {
     await api("/api/generate", { method: "POST", body: fd });
@@ -268,9 +613,17 @@ async function loadGallery() {
     const m = it.meta || {};
     d.innerHTML = `<img src="/outputs/${it.file}" loading="lazy" alt="">
       <div class="cap" title="${(m.prompt || "").replace(/"/g, "&quot;")}">${m.prompt || it.file}</div>
-      <div class="tools"><button title="Réutiliser le prompt et les réglages">↺ Réutiliser</button><a href="/outputs/${it.file}" download><button>⬇</button></a><button title="Supprimer">🗑</button></div>`;
+      <div class="tools">
+        <button class="btn-reuse" title="Réutiliser le prompt et les réglages">↺ Réutiliser</button>
+        <button class="btn-edit" title="Utiliser comme image de référence pour la modifier">🎨 Éditer</button>
+        <a href="/outputs/${it.file}" download><button title="Télécharger">⬇</button></a>
+        <button class="btn-del" title="Supprimer">🗑</button>
+      </div>`;
     d.querySelector("img").onclick = () => openLightbox(`/outputs/${it.file}`, m.prompt || it.file);
-    const [reuse, , del] = d.querySelectorAll("button");
+    const reuse = d.querySelector(".btn-reuse");
+    const editBtn = d.querySelector(".btn-edit");
+    const del = d.querySelector(".btn-del");
+
     reuse.onclick = async () => {
       if (m.family && m.family !== STATUS.config.family && famById(m.family)) { await postJSON("/api/config", { family: m.family }); await refreshStatus(); }
       if (m.prompt) $("#prompt").value = m.prompt;
@@ -284,6 +637,25 @@ async function loadGallery() {
       syncPreset();
       showTab("generate");
     };
+
+    editBtn.onclick = async () => {
+      try {
+        const res = await fetch(`/outputs/${it.file}`);
+        const blob = await res.blob();
+        const file = new File([blob], it.file, { type: blob.type || "image/png" });
+        if (m.family && m.family !== STATUS.config.family && famById(m.family)) {
+          await postJSON("/api/config", { family: m.family });
+          await refreshStatus();
+        }
+        if (m.prompt) $("#prompt").value = m.prompt;
+        if (m.negative_prompt != null) $("#negative").value = m.negative_prompt;
+        showTab("generate");
+        handleNewFiles([file]);
+      } catch (err) {
+        console.error("Erreur lors du chargement de l'image de galerie:", err);
+      }
+    };
+
     del.onclick = async () => { if (confirm("Supprimer cette image ?")) { await api(`/api/gallery/${it.file}`, { method: "DELETE" }); loadGallery(); } };
     root.appendChild(d);
   }

@@ -163,7 +163,8 @@ async def generate(
 ):
     if not prompt.strip():
         raise HTTPException(400, "Le prompt est vide.")
-    width, height = max(256, width // 32 * 32), max(256, height // 32 * 32)
+    width = min(2048, max(256, round(width / 32) * 32))
+    height = min(2048, max(256, round(height / 32) * 32))
     refs: list[str] = []
     for f in ref_images:
         if not f.filename:
